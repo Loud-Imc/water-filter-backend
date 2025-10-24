@@ -1,0 +1,190 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum RequestType {
+  SERVICE
+  INSTALLATION
+  COMPLAINT
+}
+
+enum RequestStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  ASSIGNED
+  IN_PROGRESS
+  WORK_COMPLETED
+  COMPLETED
+  REJECTED
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  SUSPENDED
+}
+
+model Region {
+  id String @id @default(uuid())
+  name            String           @unique
+  technicians     User[]
+  customers       Customer[]
+  serviceRequests ServiceRequest[]
+}
+
+model Role {
+  id String @id @default(uuid())
+  name        String
+  parentRole  String?
+  permissions Json
+  immutable   Boolean @default(false) // true for Super Admin
+  users       User[]
+}
+
+
+
+model User {
+  id          String    @id @default(uuid())
+  name        String
+  email       String    @unique
+  password    String
+  phone       String?
+  refreshToken String?
+  roleId      String
+  regionId    String?
+  status      UserStatus @default(ACTIVE)
+  isExternal  Boolean    @default(false)
+  createdById String?
+  createdAt   DateTime   @default(now())
+  approvalHistory ApprovalHistory[]
+
+  role        Role       @relation(fields: [roleId], references: [id])
+  region      Region?    @relation(fields: [regionId], references: [id])
+  createdBy   User?      @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers User[]    @relation("UserCreator")
+
+  requestedRequests ServiceRequest[]  @relation("Requester")
+  approvedRequests  ServiceRequest[]  @relation("Approver")
+  assignedRequests  ServiceRequest[]  @relation("TechnicianAssigned")
+  
+  // ⬇️ ADD ONLY THIS ONE LINE
+  acknowledgedRequests ServiceRequest[] @relation("AcknowledgedBy")
+  // ⬆️ NEW LINE END
+  
+  workLogs          WorkLog[]
+  notificationsSent     Notification[] @relation("NotificationSender")
+  notificationsReceived Notification[] @relation("NotificationReceiver")
+}
+
+
+// schema.prisma
+
+model Customer {
+  id            String   @id @default(uuid())
+  name          String
+  address       String
+  primaryPhone  String   @unique // Main contact number
+  phoneNumbers  String[] // Additional phone numbers (array)
+  email         String?
+  regionId      String
+  latitude      Float?   // For Google Maps
+  longitude     Float?   // For Google Maps
+  googleMapsUrl String?  // Optional: store Google Maps link
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  region        Region          @relation(fields: [regionId], references: [id])
+  requests      ServiceRequest[]
+  
+  @@index([regionId])
+  @@index([primaryPhone])
+}
+
+
+model ServiceRequest {
+  id            String       @id @default(uuid())
+  type          RequestType
+  description   String
+  status        RequestStatus @default(DRAFT)
+  requestedById String
+  approvedById  String?      // Final approver
+  assignedToId  String?
+  regionId      String
+  customerId    String
+  createdAt     DateTime     @default(now())
+  salesApproved Boolean      @default(false)
+  
+  acknowledgedById       String?
+  acknowledgedAt         DateTime?
+  acknowledgmentComments String?
+
+  
+  requestedBy   User         @relation("Requester", fields: [requestedById], references: [id])
+  approvedBy    User?        @relation("Approver", fields: [approvedById], references: [id])
+  assignedTo    User?        @relation("TechnicianAssigned", fields: [assignedToId], references: [id])
+
+  acknowledgedBy User?       @relation("AcknowledgedBy", fields: [acknowledgedById], references: [id])
+  
+  region        Region       @relation(fields: [regionId], references: [id])
+  customer      Customer     @relation(fields: [customerId], references: [id])
+  workLogs      WorkLog[]
+  workMedia     WorkMedia[]
+  approvalHistory ApprovalHistory[]
+}
+
+
+
+model WorkLog {
+  id           String    @id @default(uuid())
+  requestId    String    // changed from Int to String
+  technicianId String    // changed from Int to String
+  startTime    DateTime?
+  endTime      DateTime?
+  duration     Int?
+  notes        String?
+
+  request      ServiceRequest @relation(fields: [requestId], references: [id])
+  technician   User           @relation(fields: [technicianId], references: [id])
+}
+
+model WorkMedia {
+  id         String       @id @default(uuid())
+  requestId  String       // changed from Int to String
+  fileUrl    String
+  uploadedAt DateTime     @default(now())
+  request    ServiceRequest @relation(fields: [requestId], references: [id])
+}
+
+model Notification {
+  id         String     @id @default(uuid())
+  fromUserId String     // changed from Int to String
+  toUserId   String     // changed from Int to String
+  message    String
+  status     String     @default("sent")
+  createdAt  DateTime   @default(now())
+
+  sender     User       @relation("NotificationSender", fields: [fromUserId], references: [id])
+  receiver   User       @relation("NotificationReceiver", fields: [toUserId], references: [id])
+}
+
+model ApprovalHistory {
+  id              String        @id @default(uuid())
+  requestId       String
+  approverId      String
+  approverRole    String
+  status          String        // APPROVED, REJECTED
+  comments        String?
+  approvedAt      DateTime      @default(now())
+  
+  request         ServiceRequest @relation(fields: [requestId], references: [id])
+  approver        User          @relation(fields: [approverId], references: [id])
+}
+
+
+
