@@ -11,6 +11,7 @@ enum RequestType {
   SERVICE
   INSTALLATION
   COMPLAINT
+  ENQUIRY   
 }
 
 enum RequestStatus {
