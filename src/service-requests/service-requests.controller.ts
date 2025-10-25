@@ -65,7 +65,7 @@ export class ServiceRequestsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   getDashboardStats(@Req() req: any) {
     const userId = req.user.userId;
-    const userRole = req.user.role;
+    const userRole = req.user.roleName;
     return this.serviceRequestsService.getDashboardStats(userId, userRole);
   }
 

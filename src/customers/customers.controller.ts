@@ -27,6 +27,13 @@ export class CustomersController {
     return this.customersService.findAll();
   }
 
+  @Get(':id/history')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('Super Admin', 'Service Admin', 'Service Manager', 'Sales Manager')
+  getCustomerHistory(@Param('id') id: string) {
+    return this.customersService.getCustomerHistory(id);
+  }
+
   @Get(':id')
   @Roles('Super Admin', 'Service Admin', 'Technician')
   findOne(@Param('id') id: string) {
@@ -42,7 +49,7 @@ export class CustomersController {
   @Put('/update-location/:id')
   @Roles('Super Admin', 'Service Admin', 'Technician')
   updateLocation(@Param('id') id: string, @Body() body: UpdateLocationDto) {
-    console.log('dto: location: ', body)
+    console.log('dto: location: ', body);
     return this.customersService.update(id, body);
   }
 

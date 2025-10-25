@@ -349,12 +349,10 @@ export class ServiceRequestsService {
   async getDashboardStats(userId: string, userRole: string) {
     // Base query conditions
     const baseConditions = this.getBaseConditions(userId, userRole);
-
     // Total requests
     const totalRequests = await this.prisma.serviceRequest.count({
       where: baseConditions,
     });
-
     // Pending approval
     const pendingApproval = await this.prisma.serviceRequest.count({
       where: {
