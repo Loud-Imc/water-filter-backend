@@ -102,7 +102,7 @@ async function main() {
   });
 
   if (superAdminRole) {
-    const hashedPassword = await bcrypt.hash('Kamaru@123', 10);
+    const hashedPassword = await bcrypt.hash('Admin@123', 10);
     await prisma.user.create({
       data: {
         name: 'Super Admin',
@@ -123,11 +123,11 @@ async function main() {
   });
 
   if (technicianRole) {
-    const hashedPassword = await bcrypt.hash('Kamaru@123', 10);
+    const hashedPassword = await bcrypt.hash('Technician@123', 10);
     await prisma.user.create({
       data: {
         name: 'Kamarudhin',
-        email: 'kamaru916@gmail.com',
+        email: 'technician@gmail.com',
         password: hashedPassword, // Kamaru@123
         roleId: technicianRole.id,
         regionId: firstRegion.id,
