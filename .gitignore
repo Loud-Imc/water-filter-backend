@@ -12,9 +12,11 @@ pnpm-lock.yaml
 *.db
 *.sqlite
 
-# Uploads (optional - exclude if you don't want to commit uploaded files)
-uploads/
+# NEW (use this):
+uploads/*
 !uploads/.gitkeep
+# Allow src/uploads module
+!src/uploads/
 
 # Build output
 dist/
