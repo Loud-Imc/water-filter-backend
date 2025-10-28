@@ -1,0 +1,57 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Install dependencies
+        run: npm install
+
+      - name: 🏗️ Build project
+        run: npm run build
+
+      - name: 🚀 Deploy to server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            # Navigate to backend directory
+            cd /var/www/waterfilter/backend/water-filter-backend
+            
+            # Pull latest code
+            git pull origin main
+            
+            # Install dependencies
+            npm install
+            
+            # Run Prisma migrations (if any)
+            npx prisma generate
+            npx prisma migrate deploy
+            
+            # Build project
+            npm run build
+            
+            # Restart PM2 process
+            pm2 restart waterfilter-api || pm2 start npm --name waterfilter-api -- start
+            
+            # Save PM2 list
+            pm2 save
+            
+            echo "✅ Backend deployed successfully!"
