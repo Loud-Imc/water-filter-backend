@@ -8,91 +8,122 @@ import {
   Delete,
   UseGuards,
   Req,
+  Query,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
-import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions } from '../auth/permissions.decorator';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+// ✅ Apply all guards globally
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  // ✅ FIXED: Remove @Roles, use only @RequirePermissions
   @Get()
-  @Roles('Super Admin')
+  @RequirePermissions('users.view')
   getAll() {
     return this.usersService.findAll();
   }
 
-  // ⬇️ SPECIFIC ROUTES FIRST - BEFORE :id
+  // ✅ FIXED: Only permission check
+  @Get('technicians/search')
+  @RequirePermissions('services.assign')
+  searchTechnicians(
+    @Query('query') query: string,
+    @Query('regionId') regionId?: string,
+    @Query('limit') limit: string = '20',
+  ) {
+    return this.usersService.searchTechnicians(
+      query,
+      regionId,
+      parseInt(limit),
+    );
+  }
+
+  // ✅ FIXED: Only permission check
   @Get('my-subordinates')
-  @Roles(
-    'Super Admin',
-    'Service Admin',
-    'Sales Admin',
-    'Service Manager',
-    'Sales Manager',
-    'Service Team Lead',
-    'Sales Team Lead',
-  )
-  async getMySubordinates(@Req() req) {
+  @RequirePermissions('users.view')
+  getMySubordinates(@Req() req) {
     return this.usersService.getUsersByCreator(req.user.userId);
   }
 
+  // ✅ FIXED: Only permission check
   @Get('my-hierarchy')
-  @Roles(
-    'Super Admin',
-    'Service Admin',
-    'Sales Admin',
-    'Service Manager',
-    'Sales Manager',
-    'Service Team Lead',
-    'Sales Team Lead',
-  )
-  async getMyHierarchy(@Req() req) {
+  @RequirePermissions('users.view')
+  getMyHierarchy(@Req() req) {
     return this.usersService.getUsersInHierarchy(req.user.userId);
   }
 
+  // ✅ FIXED: Only permission check
   @Get('assignable-roles')
-  @Roles(
-    'Super Admin',
-    'Service Admin',
-    'Sales Admin',
-    'Service Manager',
-    'Sales Manager',
-    'Service Team Lead',
-    'Sales Team Lead',
-  )
-  async getAssignableRoles(@Req() req) {
+  @RequirePermissions('users.view')
+  getAssignableRoles(@Req() req) {
     return this.usersService.getAssignableRoles(req.user.userId);
   }
-  // ⬆️ SPECIFIC ROUTES END
 
-  // ⬇️ DYNAMIC ROUTE LAST
+  // ✅ FIXED: Only permission check
+  @Get('meta/available-permissions')
+  @RequirePermissions('users.edit')
+  getAvailablePermissions() {
+    return this.usersService.getAvailablePermissions();
+  }
+
+  // ✅ NEW: Get my own permissions (NO RESTRICTIONS - everyone can see their own)
+  @Get('me/permissions')
+  getMyPermissions(@Req() req) {
+    return this.usersService.getUserPermissions(req.user.userId);
+  }
+
+  // ✅ FIXED: Only permission check (for admins viewing other users)
+  @Get(':id/permissions')
+  @RequirePermissions('users.edit')
+  getUserPermissions(@Param('id') id: string) {
+    return this.usersService.getUserPermissions(id);
+  }
+
+  // ✅ FIXED: Only permission check
   @Get(':id')
-  @Roles('Super Admin', 'Service Admin', 'Manager')
+  @RequirePermissions('users.view')
   getOne(@Param('id') id: string) {
     return this.usersService.findOne(id);
   }
-  // ⬆️ DYNAMIC ROUTE
 
+  // ✅ FIXED: Only permission check
   @Post()
-  @Roles('Super Admin', 'Service Admin', 'Manager')
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.create(dto);
+  @RequirePermissions('users.create')
+  create(@Body() dto: CreateUserDto, @Req() req) {
+    return this.usersService.create({
+      ...dto,
+      createdById: req.user.userId,
+    });
   }
 
+  // ✅ FIXED: Only permission check
   @Put(':id')
-  @Roles('Super Admin', 'Service Admin', 'Manager')
+  @RequirePermissions('users.edit')
   update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.update(id, dto);
   }
 
+  // ✅ FIXED: Only permission check
+  @Put(':id/permissions')
+  @RequirePermissions('users.edit')
+  updateUserPermissions(
+    @Param('id') id: string,
+    @Body() dto: { add?: string[]; remove?: string[] },
+  ) {
+    return this.usersService.updateUserPermissions(id, dto);
+  }
+
+  // ✅ FIXED: Only permission check
   @Delete(':id')
-  @Roles('Super Admin')
+  @RequirePermissions('users.delete')
   delete(@Param('id') id: string) {
     return this.usersService.delete(id);
   }

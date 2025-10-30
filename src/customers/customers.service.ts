@@ -11,6 +11,38 @@ export class CustomersService {
     return this.prisma.customer.findMany({ include: { region: true } });
   }
 
+  async searchCustomers(query: string, regionId?: string, limit: number = 20) {
+    const whereClause: any = {
+      OR: [
+        { name: { contains: query, mode: 'insensitive' } },
+        { primaryPhone: { contains: query } },
+        { email: { contains: query, mode: 'insensitive' } },
+      ],
+    };
+
+    if (regionId) {
+      whereClause.regionId = regionId;
+    }
+
+    return this.prisma.customer.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        name: true,
+        primaryPhone: true,
+        address: true,
+        region: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      take: limit,
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async findOne(id: string) {
     const customer = await this.prisma.customer.findUnique({ where: { id } });
     if (!customer) throw new NotFoundException('Customer not found');

@@ -11,6 +11,29 @@ export class RegionsService {
     return this.prisma.region.findMany();
   }
 
+  async searchRegions(query: string, limit: number = 20) {
+    return this.prisma.region.findMany({
+      where: {
+        name: {
+          contains: query,
+          mode: 'insensitive',
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        _count: {
+          select: {
+            customers: true,
+            technicians: true,
+          },
+        },
+      },
+      take: limit,
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async findOne(id: string) {
     const region = await this.prisma.region.findUnique({ where: { id } });
     if (!region) throw new NotFoundException('Region not found');

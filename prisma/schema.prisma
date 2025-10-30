@@ -74,9 +74,9 @@ model User {
   approvedRequests  ServiceRequest[]  @relation("Approver")
   assignedRequests  ServiceRequest[]  @relation("TechnicianAssigned")
   
-  // ⬇️ ADD ONLY THIS ONE LINE
+  customPermissions Json? 
   acknowledgedRequests ServiceRequest[] @relation("AcknowledgedBy")
-  // ⬆️ NEW LINE END
+
   
   workLogs          WorkLog[]
   notificationsSent     Notification[] @relation("NotificationSender")

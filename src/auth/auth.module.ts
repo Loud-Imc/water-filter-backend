@@ -5,6 +5,8 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionsService } from './permissions.service';
+import { PermissionsGuard } from './permissions.guard';
 
 @Module({
   imports: [
@@ -15,7 +17,13 @@ import { PrismaService } from '../prisma/prisma.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, PrismaService],
-  exports: [AuthService],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    PrismaService,
+    PermissionsService,
+    PermissionsGuard,
+  ],
+  exports: [AuthService, PermissionsService],
 })
 export class AuthModule {}

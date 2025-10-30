@@ -1,42 +1,69 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Param,
+  Body,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { RegionsService } from './regions.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/roles.decorator';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions } from '../auth/permissions.decorator';
 import { CreateRegionDto } from './dto/create-region.dto';
 import { UpdateRegionDto } from './dto/update-region.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+// ✅ UPDATED: Added PermissionsGuard
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('regions')
 export class RegionsController {
   constructor(private regionsService: RegionsService) {}
 
+  // ✅ UPDATED: Permission-based
   @Get()
-  @Roles('Super Admin', 'Service Admin')
+  // @RequirePermissions('regions.view')
   findAll() {
     return this.regionsService.findAll();
   }
 
+  // ✅ UPDATED: Permission-based
+  @Get('search')
+  @RequirePermissions('regions.view')
+  searchRegions(
+    @Query('query') query: string,
+    @Query('limit') limit: string = '20',
+  ) {
+    return this.regionsService.searchRegions(query, parseInt(limit));
+  }
+
+  // ✅ UPDATED: Permission-based
   @Get(':id')
-  @Roles('Super Admin', 'Service Admin')
+  @RequirePermissions('regions.view')
   findOne(@Param('id') id: string) {
     return this.regionsService.findOne(id);
   }
 
+  // ✅ UPDATED: Permission-based
   @Post()
-  @Roles('Super Admin', 'Service Admin')
+  @RequirePermissions('regions.create')
   create(@Body() body: CreateRegionDto) {
     return this.regionsService.create(body);
   }
 
+  // ✅ UPDATED: Permission-based
   @Put(':id')
-  @Roles('Super Admin', 'Service Admin')
+  @RequirePermissions('regions.create') // or 'regions.edit' if you add it
   update(@Param('id') id: string, @Body() body: UpdateRegionDto) {
     return this.regionsService.update(id, body);
   }
 
+  // ✅ UPDATED: Permission-based
   @Delete(':id')
-  @Roles('Super Admin')
+  @RequirePermissions('regions.create') // or 'regions.delete' if you add it
   remove(@Param('id') id: string) {
     return this.regionsService.remove(id);
   }

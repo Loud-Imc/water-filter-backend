@@ -7,33 +7,33 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer'; // ✅ Import diskStorage
-import { extname } from 'path'; // ✅ Import path utilities
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { UploadsService } from './uploads.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
+// ✅ Upload controller - role-based access (Technicians + Admins)
 @Controller('uploads')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UploadsController {
   constructor(private uploadsService: UploadsService) {}
 
+  // Upload work media (before/after photos)
   @Post('work-media/:requestId')
-  @Roles('Technician', 'Service Admin', 'Super Admin') // ✅ Allow admins too
+  @Roles('Technician', 'Service Admin', 'Super Admin')
   @UseInterceptors(
     FileInterceptor('file', {
-      // ✅ Use diskStorage instead of dest
       storage: diskStorage({
-        destination: './uploads/work-media', // ✅ Specific folder
+        destination: './uploads/work-media',
         filename: (req, file, cb) => {
-          // ✅ Generate unique filename with proper extension
           const randomName = Array(32)
             .fill(null)
             .map(() => Math.round(Math.random() * 16).toString(16))
             .join('');
-          const ext = extname(file.originalname); // ✅ Get original extension
-          cb(null, `${randomName}${ext}`); // ✅ e.g., abc123.jpg
+          const ext = extname(file.originalname);
+          cb(null, `${randomName}${ext}`);
         },
       }),
       limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
@@ -51,6 +51,9 @@ export class UploadsController {
     @Param('requestId') requestId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
+    if (!file) {
+      throw new Error('No file uploaded');
+    }
     return this.uploadsService.uploadWorkMedia(requestId, file);
   }
 }
