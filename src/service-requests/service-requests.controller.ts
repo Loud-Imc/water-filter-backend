@@ -13,70 +13,54 @@ import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/roles.decorator';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions } from '../auth/permissions.decorator';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+// ✅ UPDATED: Added PermissionsGuard
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('service-requests')
 export class ServiceRequestsController {
   constructor(private serviceRequestsService: ServiceRequestsService) {}
 
+  // ✅ UPDATED: Permission-based
   @Post()
-  @Roles(
-    'Super Admin',
-    'Service Admin',
-    'Sales Admin',
-    'Service Manager',
-    'Sales Manager',
-    'Service Team Lead',
-    'Sales Team Lead',
-    'Technician',
-    'Salesman',
-  )
+  @RequirePermissions('services.create')
   create(@Body() dto: CreateServiceRequestDto) {
     return this.serviceRequestsService.create(dto);
   }
 
+  // ✅ UPDATED: Permission-based
   @Get()
-  @Roles(
-    'Super Admin',
-    'Service Admin',
-    'Sales Admin',
-    'Service Manager',
-    'Sales Manager',
-  )
+  @RequirePermissions('services.view')
   findAll() {
     return this.serviceRequestsService.findAll();
   }
 
+  // ✅ UPDATED: Permission-based
   @Get(':id')
-  @Roles(
-    'Super Admin',
-    'Service Admin',
-    'Sales Admin',
-    'Service Manager',
-    'Sales Manager',
-    'Technician',
-  )
+  @RequirePermissions('services.view')
   findOne(@Param('id') id: string) {
     return this.serviceRequestsService.findOne(id);
   }
 
+  // ✅ Dashboard stats - anyone authenticated can see their own stats
   @Get('dashboard/stats')
-  @UseGuards(JwtAuthGuard, RolesGuard)
   getDashboardStats(@Req() req: any) {
     const userId = req.user.userId;
     const userRole = req.user.roleName;
     return this.serviceRequestsService.getDashboardStats(userId, userRole);
   }
 
+  // ✅ UPDATED: Permission-based
   @Patch(':id')
-  @Roles('Super Admin', 'Service Admin', 'Service Manager')
+  @RequirePermissions('services.edit')
   update(@Param('id') id: string, @Body() dto: UpdateServiceRequestDto) {
     return this.serviceRequestsService.update(id, dto);
   }
 
+  // ✅ UPDATED: Permission-based
   @Patch(':id/acknowledge')
-  @Roles('Super Admin', 'Service Admin', 'Service Manager')
+  @RequirePermissions('services.edit')
   async acknowledgeCompletion(
     @Param('id') id: string,
     @Req() req: Request & { user: { userId: string } },
@@ -89,8 +73,9 @@ export class ServiceRequestsController {
     );
   }
 
+  // ✅ UPDATED: Permission-based
   @Post(':id/sales-approve')
-  @Roles('Super Admin', 'Sales Admin')
+  @RequirePermissions('services.approve')
   salesApprove(
     @Param('id') id: string,
     @Req() req,
@@ -103,8 +88,9 @@ export class ServiceRequestsController {
     );
   }
 
+  // ✅ UPDATED: Permission-based
   @Post(':id/service-approve')
-  @Roles('Super Admin', 'Service Admin', 'Service Manager', 'Service Team Lead')
+  @RequirePermissions('services.approve')
   serviceApprove(
     @Param('id') id: string,
     @Req() req,
@@ -117,14 +103,9 @@ export class ServiceRequestsController {
     );
   }
 
+  // ✅ UPDATED: Permission-based
   @Post(':id/reject')
-  @Roles(
-    'Super Admin',
-    'Service Admin',
-    'Sales Admin',
-    'Service Manager',
-    'Service Team Lead',
-  )
+  @RequirePermissions('services.approve')
   reject(
     @Param('id') id: string,
     @Req() req,
@@ -137,14 +118,16 @@ export class ServiceRequestsController {
     );
   }
 
+  // ✅ UPDATED: Permission-based
   @Post(':id/auto-assign')
-  @Roles('Super Admin', 'Service Admin', 'Service Manager')
+  @RequirePermissions('services.assign')
   autoAssign(@Param('id') id: string) {
     return this.serviceRequestsService.autoAssignTechnician(id);
   }
 
+  // ✅ UPDATED: Permission-based
   @Post(':id/manual-assign')
-  @Roles('Super Admin', 'Service Admin', 'Service Manager')
+  @RequirePermissions('services.assign')
   manualAssign(
     @Param('id') id: string,
     @Body('technicianId') technicianId: string,
