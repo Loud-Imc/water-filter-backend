@@ -5,6 +5,8 @@ import {
   IsOptional,
   IsBoolean,
   IsUUID,
+  IsArray,
+  MinLength,
 } from 'class-validator';
 
 export class CreateUserDto {
@@ -16,6 +18,7 @@ export class CreateUserDto {
   email: string;
 
   @IsString()
+  @MinLength(8)
   @IsNotEmpty()
   password: string;
 
@@ -37,5 +40,11 @@ export class CreateUserDto {
 
   @IsUUID()
   @IsOptional()
-  createdById?: string; // Allow this field
+  createdById?: string;
+
+  // ✅ NEW: Allow passing additional custom permissions during creation
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  customPermissions?: string[];
 }

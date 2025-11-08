@@ -480,4 +480,258 @@ export class ServiceRequestsService {
         return { requestedById: userId };
     }
   }
+
+  // ✅ ADD THESE METHODS AT THE END:
+
+  async reassignTechnician(
+    id: string,
+    newTechnicianId: string,
+    reassignedById: string,
+    reason: string,
+  ) {
+    const request = await this.findOne(id);
+    const reassigner = await this.prisma.user.findUnique({
+      where: { id: reassignedById },
+      include: { role: true },
+    });
+
+    if (!reassigner) {
+      throw new NotFoundException('Reassigner not found');
+    }
+
+    // ✅ ONLY ALLOW ASSIGNED STATUS (before work starts)
+    if (request.status !== 'ASSIGNED') {
+      throw new ForbiddenException(
+        `Can only reassign technicians when status is ASSIGNED. Current status: ${request.status}`,
+      );
+    }
+
+    // ✅ VERIFY REASSIGNER HAS PERMISSION
+    const allowedRoles = [
+      'Super Admin',
+      'Service Admin',
+      'Service Manager',
+      'Service Team Lead',
+    ];
+    if (!allowedRoles.includes(reassigner.role.name)) {
+      throw new ForbiddenException(
+        'Insufficient permissions to reassign technician',
+      );
+    }
+
+    // ✅ VALIDATE NEW TECHNICIAN
+    const newTechnician = await this.prisma.user.findUnique({
+      where: { id: newTechnicianId },
+      include: { role: true },
+    });
+
+    if (!newTechnician || newTechnician.role.name !== 'Technician') {
+      throw new BadRequestException('Invalid new technician');
+    }
+
+    if (newTechnician.id === request.assignedToId) {
+      throw new BadRequestException(
+        'Technician is already assigned to this request',
+      );
+    }
+
+    // ✅ GET OLD TECHNICIAN FOR NOTIFICATION
+    const oldTechnician = request.assignedToId
+      ? await this.prisma.user.findUnique({
+          where: { id: request.assignedToId },
+        })
+      : null;
+
+    // ✅ CREATE REASSIGNMENT HISTORY (AUDIT TRAIL)
+    await this.prisma.reassignmentHistory.create({
+      data: {
+        requestId: id,
+        reassignedBy: reassignedById,
+        previousTechId: request.assignedToId,
+        newTechId: newTechnicianId,
+        reason,
+      },
+    });
+
+    // ✅ UPDATE REQUEST
+    const updatedRequest = await this.prisma.serviceRequest.update({
+      where: { id },
+      data: {
+        assignedToId: newTechnicianId,
+      },
+      include: {
+        assignedTo: true,
+        reassignmentHistory: {
+          include: {
+            reassigner: true,
+            previousTech: true,
+            newTech: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    // ✅ NOTIFY OLD TECHNICIAN
+    if (oldTechnician) {
+      await this.notificationsService.createNotification(
+        reassignedById,
+        oldTechnician.id,
+        `Service request #${id} has been reassigned from you. Reason: ${reason}`,
+      );
+    }
+
+    // ✅ NOTIFY NEW TECHNICIAN
+    await this.notificationsService.notifyRequestAssigned(id, newTechnicianId);
+
+    return updatedRequest;
+  }
+
+  async getReassignmentHistory(id: string) {
+    const request = await this.findOne(id); // Validate request exists
+
+    return this.prisma.reassignmentHistory.findMany({
+      where: { requestId: id },
+      include: {
+        reassigner: {
+          select: { id: true, name: true, email: true },
+        },
+        previousTech: {
+          select: { id: true, name: true, email: true },
+        },
+        newTech: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // ✅ ADD THESE METHODS:
+
+  async addUsedProducts(
+    requestId: string,
+    userId: string,
+    usedProducts: Array<{
+      productId: string;
+      quantityUsed: number;
+      notes?: string;
+    }>,
+  ) {
+    const request = await this.findOne(requestId);
+    const technician = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
+    });
+
+    if (!technician) {
+      throw new NotFoundException('User not found');
+    }
+
+    // ✅ ONLY TECHNICIAN CAN ADD USED PRODUCTS
+    if (technician.role.name !== 'Technician') {
+      throw new ForbiddenException('Only technicians can add used products');
+    }
+
+    // ✅ CHECK STATUS - WORK_COMPLETED ONLY
+    if (request.status !== 'WORK_COMPLETED') {
+      throw new ForbiddenException(
+        'Products can only be added when work is completed. Current status: ' +
+          request.status,
+      );
+    }
+
+    // ✅ CHECK IF PRODUCTS ALREADY ADDED
+    const existingProducts = await this.prisma.serviceUsedProduct.findMany({
+      where: { requestId },
+    });
+
+    if (existingProducts.length > 0) {
+      throw new BadRequestException(
+        'Products already added for this service request. Editing is not allowed.',
+      );
+    }
+
+    // ✅ VALIDATE & PROCESS EACH PRODUCT
+    const addedProducts: any[] = [];
+
+    for (const item of usedProducts) {
+      const product = await this.prisma.product.findUnique({
+        where: { id: item.productId },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product ${item.productId} not found`);
+      }
+
+      if (product.stock < item.quantityUsed) {
+        throw new BadRequestException(
+          `Insufficient stock for product "${product.name}". Available: ${product.stock}, Requested: ${item.quantityUsed}`,
+        );
+      }
+
+      // ✅ CREATE USED PRODUCT RECORD
+      const usedProduct = await this.prisma.serviceUsedProduct.create({
+        data: {
+          requestId,
+          productId: item.productId,
+          quantityUsed: item.quantityUsed,
+          notes: item.notes,
+          confirmedBy: userId,
+        },
+        include: {
+          product: true,
+          confirmedUser: true,
+        },
+      });
+
+      // ✅ DECREASE STOCK QUANTITY
+      await this.prisma.product.update({
+        where: { id: item.productId },
+        data: {
+          stock: {
+            decrement: item.quantityUsed,
+          },
+        },
+      });
+
+      // ✅ LOG STOCK CHANGE
+      await this.prisma.stockHistory.create({
+        data: {
+          productId: item.productId,
+          quantityChange: -item.quantityUsed,
+          reason: `Used in Service: Request #${requestId}`,
+        },
+      });
+
+      addedProducts.push(usedProduct);
+    }
+
+    return addedProducts;
+  }
+
+  async getUsedProducts(requestId: string) {
+    const request = await this.findOne(requestId);
+
+    return this.prisma.serviceUsedProduct.findMany({
+      where: { requestId },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            price: true,
+          },
+        },
+        confirmedUser: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: { confirmedAt: 'desc' },
+    });
+  }
 }

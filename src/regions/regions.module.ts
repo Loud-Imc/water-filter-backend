@@ -8,5 +8,6 @@ import { AuthModule } from 'src/auth/auth.module';
   imports: [AuthModule],
   controllers: [RegionsController],
   providers: [RegionsService, PrismaService],
+  exports: [RegionsService],
 })
 export class RegionModule {}

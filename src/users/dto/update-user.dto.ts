@@ -1,17 +1,13 @@
-import { PartialType } from '@nestjs/mapped-types';
+import { PartialType, OmitType } from '@nestjs/mapped-types';
 import { CreateUserDto } from './create-user.dto';
-import { IsOptional, IsEnum, IsObject } from 'class-validator';
-import { UserStatus } from '@prisma/client'; // assuming you export this
+import { IsOptional, IsEnum } from 'class-validator';
+import { UserStatus } from '@prisma/client';
 
-export class UpdateUserDto extends PartialType(CreateUserDto) {
+// Omit password and customPermissions from update (handle separately)
+export class UpdateUserDto extends PartialType(
+  OmitType(CreateUserDto, ['password', 'customPermissions'] as const),
+) {
   @IsEnum(UserStatus)
   @IsOptional()
   status?: UserStatus;
-
-  @IsObject()
-  @IsOptional()
-  customPermissions?: {
-    add?: string[];
-    remove?: string[];
-  };
 }

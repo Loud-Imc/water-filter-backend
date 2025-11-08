@@ -2,9 +2,14 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ALL_PERMISSIONS } from '../constants/permissions';
+import {
+  ALL_PERMISSIONS,
+  getDefaultPermissionsForRole,
+  isDefaultPermission,
+} from '../constants/permissions';
 import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -14,7 +19,10 @@ export class UsersService {
   constructor(private prisma: PrismaService) {}
 
   async findAll() {
-    return this.prisma.user.findMany({ include: { role: true, region: true } });
+    return this.prisma.user.findMany({
+      include: { role: true, region: true },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async searchTechnicians(
@@ -34,7 +42,7 @@ export class UsersService {
         {
           role: {
             name: {
-              in: ['Service Technician', 'Senior Technician'],
+              in: ['Technician', 'Service Technician', 'Senior Technician'],
             },
           },
         },
@@ -71,47 +79,298 @@ export class UsersService {
       include: { role: true, region: true },
     });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+
+    // Remove password from response
+    const { password, ...userWithoutPassword } = user;
+    return userWithoutPassword;
   }
 
   async create(dto: CreateUserDto) {
-    console.log('dto":', dto);
+    console.log('Creating user with dto:', dto);
+
+    // Hash password
     const hashedPassword = await bcrypt.hash(
       dto.password,
       Number(process.env.BCRYPT_SALT_ROUNDS || 10),
     );
-    // Optionally validate roleId and regionId existence
+
+    // Get role information
+    const role = await this.prisma.role.findUnique({
+      where: { id: dto.roleId },
+    });
+
+    if (!role) {
+      throw new BadRequestException('Invalid role selected');
+    }
+
+    // ✅ Get default permissions for this role
+    const defaultPermissions = getDefaultPermissionsForRole(role.name);
+    console.log(`Default permissions for ${role.name}:`, defaultPermissions);
+
+    // ✅ Merge custom permissions with default permissions
+    let finalPermissions: string[] = [...defaultPermissions];
+
+    if (dto.customPermissions && Array.isArray(dto.customPermissions)) {
+      // Add custom permissions (avoiding duplicates)
+      finalPermissions = [
+        ...new Set([...finalPermissions, ...dto.customPermissions]),
+      ];
+    }
+
+    console.log('Final permissions:', finalPermissions);
+
+    // Create user with permissions stored as array
     const newUser = await this.prisma.user.create({
       data: {
-        ...dto,
+        name: dto.name,
+        email: dto.email,
         password: hashedPassword,
+        phone: dto.phone,
+        roleId: dto.roleId,
+        regionId: dto.regionId,
+        isExternal: dto.isExternal || false,
+        createdById: dto.createdById,
+        status: 'ACTIVE',
+        // ✅ Store as JSON array in customPermissions field
+        customPermissions: finalPermissions,
+      },
+      include: {
+        role: true,
+        region: true,
       },
     });
+
     const { password, ...userWithoutPassword } = newUser;
     return userWithoutPassword;
   }
 
-  // async update(id: string, dto: any) {
-  //   if (dto.password) {
-  //     dto.password = await bcrypt.hash(
-  //       dto.password,
-  //       Number(process.env.BCRYPT_SALT_ROUNDS || 10),
-  //     );
-  //   }
-  //   const updatedUser = await this.prisma.user.update({
-  //     where: { id },
-  //     data: dto,
-  //   });
-  //   const { password, ...userWithoutPassword } = updatedUser;
-  //   return userWithoutPassword;
-  // }
+  async update(id: string, dto: UpdateUserDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { role: true },
+    });
 
-  async delete(id: string) {
-    await this.findOne(id); // ensure exists
-    await this.prisma.user.delete({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updateData: any = {
+      name: dto.name,
+      email: dto.email,
+      phone: dto.phone,
+      regionId: dto.regionId,
+      status: dto.status,
+      isExternal: dto.isExternal,
+    };
+
+    // ✅ If role is changing, recalculate permissions
+    if (dto.roleId && dto.roleId !== user.roleId) {
+      const newRole = await this.prisma.role.findUnique({
+        where: { id: dto.roleId },
+      });
+
+      if (!newRole) {
+        throw new BadRequestException('Invalid role selected');
+      }
+
+      const newDefaultPermissions = getDefaultPermissionsForRole(newRole.name);
+      const existingPermissions = (user.customPermissions as string[]) || [];
+
+      // Merge new role defaults with existing custom permissions
+      updateData.customPermissions = [
+        ...new Set([...newDefaultPermissions, ...existingPermissions]),
+      ];
+      updateData.roleId = dto.roleId;
+
+      console.log(
+        `Role changed from ${user.role.name} to ${newRole.name}, updated permissions:`,
+        updateData.customPermissions,
+      );
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id },
+      data: updateData,
+      include: {
+        role: true,
+        region: true,
+      },
+    });
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
   }
 
-  // Get users created by a specific admin (subordinates)
+  async updateUserPermissions(
+    userId: string,
+    changes: { add?: string[]; remove?: string[] },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // ✅ Get default permissions for user's role
+    const defaultPermissions = getDefaultPermissionsForRole(user.role.name);
+    console.log('Default permissions for role:', defaultPermissions);
+
+    // Validate permissions
+    const validPermissions = ALL_PERMISSIONS.map((p) => p.key);
+    const toAdd = changes.add || [];
+    const toRemove = changes.remove || [];
+
+    // Validate add permissions
+    const invalidAdd = toAdd.filter((p) => !validPermissions.includes(p));
+    if (invalidAdd.length > 0) {
+      throw new BadRequestException(
+        `Invalid permissions: ${invalidAdd.join(', ')}`,
+      );
+    }
+
+    // Validate remove permissions
+    const invalidRemove = toRemove.filter((p) => !validPermissions.includes(p));
+    if (invalidRemove.length > 0) {
+      throw new BadRequestException(
+        `Invalid permissions: ${invalidRemove.join(', ')}`,
+      );
+    }
+
+    // ✅ Filter out any attempts to remove default permissions
+    const safeRemove = toRemove.filter(
+      (perm) => !defaultPermissions.includes(perm),
+    );
+
+    if (safeRemove.length !== toRemove.length) {
+      const blockedRemovals = toRemove.filter((p) =>
+        defaultPermissions.includes(p),
+      );
+      console.warn(
+        'Attempted to remove default permissions (blocked):',
+        blockedRemovals,
+      );
+    }
+
+    // Get current permissions
+    let currentPermissions = (user.customPermissions as string[]) || [];
+
+    // Add new permissions
+    currentPermissions = [...currentPermissions, ...toAdd];
+
+    // Remove non-default permissions
+    currentPermissions = currentPermissions.filter(
+      (p) => !safeRemove.includes(p),
+    );
+
+    // ✅ Ensure all default permissions are always present
+    currentPermissions = [
+      ...new Set([...defaultPermissions, ...currentPermissions]),
+    ];
+
+    console.log('Final permissions after update:', currentPermissions);
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: { customPermissions: currentPermissions },
+      include: {
+        role: true,
+        region: true,
+      },
+    });
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  async getUserPermissions(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // ✅ Get default permissions for the role
+    const defaultPermissions = getDefaultPermissionsForRole(user.role.name);
+
+    // Get all custom permissions (which includes defaults + added)
+    const allPermissions = (user.customPermissions as string[]) || [];
+
+    // Calculate which permissions were added beyond defaults
+    const addedPermissions = allPermissions.filter(
+      (p) => !defaultPermissions.includes(p),
+    );
+
+    return {
+      roleName: user.role.name,
+      defaultPermissions, // ✅ Permissions that come with the role (cannot be removed)
+      addedPermissions, // ✅ Permissions added on top of defaults
+      allPermissions, // ✅ Complete list of permissions user has
+      effectivePermissions: allPermissions, // For backward compatibility
+    };
+  }
+
+  async getAvailablePermissions() {
+    const grouped = ALL_PERMISSIONS.reduce(
+      (acc, perm) => {
+        if (!acc[perm.module]) {
+          acc[perm.module] = [];
+        }
+        acc[perm.module].push(perm);
+        return acc;
+      },
+      {} as Record<string, typeof ALL_PERMISSIONS>,
+    );
+
+    return {
+      all: ALL_PERMISSIONS,
+      byModule: grouped,
+    };
+  }
+
+  async resetUserPassword(userId: string, newPassword: string) {
+    if (newPassword.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters');
+    }
+
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+      throw new BadRequestException(
+        'Password must contain uppercase, lowercase, and number',
+      );
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashedPassword,
+        refreshToken: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+
+    return {
+      message: 'Password reset successfully',
+      user: updatedUser,
+    };
+  }
+
+  async delete(id: string) {
+    await this.findOne(id);
+    await this.prisma.user.delete({ where: { id } });
+    return { message: 'User deleted successfully' };
+  }
+
   async getUsersByCreator(creatorId: string) {
     return this.prisma.user.findMany({
       where: { createdById: creatorId },
@@ -123,11 +382,8 @@ export class UsersService {
     });
   }
 
-  // Get all users under an admin's hierarchy (including nested subordinates)
   async getUsersInHierarchy(adminId: string) {
     const directSubordinates = await this.getUsersByCreator(adminId);
-
-    // Recursively get subordinates of subordinates
     const allSubordinates = [...directSubordinates];
 
     for (const subordinate of directSubordinates) {
@@ -138,7 +394,6 @@ export class UsersService {
     return allSubordinates;
   }
 
-  // Check if user can manage another user
   async canManageUser(
     managerId: string,
     targetUserId: string,
@@ -146,17 +401,14 @@ export class UsersService {
     const manager = await this.findOne(managerId);
     const target = await this.findOne(targetUserId);
 
-    // Super Admin can manage everyone
     if (manager.role.name === 'Super Admin') return true;
 
-    // Check if target is in manager's hierarchy
     const subordinates = await this.getUsersInHierarchy(managerId);
     return subordinates.some((sub) => sub.id === targetUserId);
   }
 
-  // Get available roles for a user to assign
   async getAssignableRoles(userId: string) {
-    console.log('get **** called');
+    console.log('getAssignableRoles called for user:', userId);
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { role: true },
@@ -166,7 +418,6 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    // Define role hierarchy
     const roleHierarchy = {
       'Super Admin': [
         'Service Admin',
@@ -185,131 +436,11 @@ export class UsersService {
       'Service Team Lead': ['Technician'],
       'Sales Team Lead': ['Salesman'],
     };
-    console.log('get **** called2', user.role.name);
+
     const assignableRoleNames = roleHierarchy[user.role.name] || [];
 
     return this.prisma.role.findMany({
       where: { name: { in: assignableRoleNames } },
-    });
-  }
-
-  async getUserPermissions(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { role: true },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // Get role permissions
-    const rolePermissions = (user.role.permissions as any)?.permissions || [];
-
-    // Get custom permissions
-    const customPerms = user.customPermissions as any;
-    const addedPermissions = customPerms?.add || [];
-    const removedPermissions = customPerms?.remove || [];
-
-    return {
-      rolePermissions,
-      customPermissions: {
-        add: addedPermissions,
-        remove: removedPermissions,
-      },
-      effectivePermissions: this.calculateEffectivePermissions(
-        rolePermissions,
-        addedPermissions,
-        removedPermissions,
-      ),
-    };
-  }
-
-  async updateUserPermissions(
-    userId: string,
-    permissions: { add?: string[]; remove?: string[] },
-  ) {
-    // Validate permissions exist
-    const validPermissions = ALL_PERMISSIONS.map((p) => p.key);
-
-    if (permissions.add) {
-      const invalidAdd = permissions.add.filter(
-        (p) => !validPermissions.includes(p),
-      );
-      if (invalidAdd.length > 0) {
-        throw new ForbiddenException(
-          `Invalid permissions: ${invalidAdd.join(', ')}`,
-        );
-      }
-    }
-
-    if (permissions.remove) {
-      const invalidRemove = permissions.remove.filter(
-        (p) => !validPermissions.includes(p),
-      );
-      if (invalidRemove.length > 0) {
-        throw new ForbiddenException(
-          `Invalid permissions: ${invalidRemove.join(', ')}`,
-        );
-      }
-    }
-
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        customPermissions: permissions,
-      },
-      include: { role: true, region: true },
-    });
-  }
-
-  async getAvailablePermissions() {
-    // Return all permissions grouped by module
-    const grouped = ALL_PERMISSIONS.reduce(
-      (acc, perm) => {
-        if (!acc[perm.module]) {
-          acc[perm.module] = [];
-        }
-        acc[perm.module].push(perm);
-        return acc;
-      },
-      {} as Record<string, typeof ALL_PERMISSIONS>,
-    );
-
-    return {
-      all: ALL_PERMISSIONS,
-      byModule: grouped,
-    };
-  }
-
-  private calculateEffectivePermissions(
-    rolePermissions: string[],
-    addedPermissions: string[],
-    removedPermissions: string[],
-  ): string[] {
-    const effective = new Set([...rolePermissions, ...addedPermissions]);
-    removedPermissions.forEach((perm) => effective.delete(perm));
-    return Array.from(effective);
-  }
-
-  // Update existing update method to handle permissions
-  async update(id: string, dto: UpdateUserDto) {
-    const updateData: any = { ...dto };
-
-    // If password is being updated, hash it
-    if (dto.password) {
-      updateData.password = await bcrypt.hash(dto.password, 10);
-    }
-
-    // Handle custom permissions if provided
-    if (dto.customPermissions) {
-      updateData.customPermissions = dto.customPermissions;
-    }
-
-    return this.prisma.user.update({
-      where: { id },
-      data: updateData,
-      include: { role: true, region: true },
     });
   }
 }
