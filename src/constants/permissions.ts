@@ -20,12 +20,22 @@ export const PERMISSION_ACTIONS = {
 export interface Permission {
   module: string;
   action: string;
-  key: string; // e.g., "customers.view"
+  key: string;
   label: string;
   description: string;
+  isDefault?: boolean; // ✅ NEW: Mark default permissions
 }
 
 export const ALL_PERMISSIONS: Permission[] = [
+  // Dashboard
+  {
+    module: PERMISSION_MODULES.DASHBOARD,
+    action: PERMISSION_ACTIONS.VIEW,
+    key: 'dashboard.view',
+    label: 'View Dashboard',
+    description: 'Access dashboard and analytics',
+  },
+
   // Customers
   {
     module: PERMISSION_MODULES.CUSTOMERS,
@@ -161,16 +171,42 @@ export const ALL_PERMISSIONS: Permission[] = [
     label: 'Export Reports',
     description: 'Export reports to Excel/PDF',
   },
-
-  // Dashboard
-  {
-    module: PERMISSION_MODULES.DASHBOARD,
-    action: PERMISSION_ACTIONS.VIEW,
-    key: 'dashboard.view',
-    label: 'View Dashboard',
-    description: 'Access dashboard and analytics',
-  },
 ];
+
+// ✅ NEW: Default permissions by role
+export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+  Technician: [
+    'dashboard.view',
+    'services.view',
+    'customers.edit',
+    'services.edit',
+  ],
+  // You can add more role defaults here
+  'Service Team Lead': [
+    'dashboard.view',
+    'services.view',
+    'services.create',
+    'services.edit',
+    'services.assign',
+    'customers.view',
+    'customers.edit',
+  ],
+  // Admin might have all permissions
+};
+
+// ✅ NEW: Helper function to get default permissions for a role
+export function getDefaultPermissionsForRole(roleName: string): string[] {
+  return DEFAULT_ROLE_PERMISSIONS[roleName] || [];
+}
+
+// ✅ NEW: Check if a permission is default for a role
+export function isDefaultPermission(
+  roleName: string,
+  permissionKey: string,
+): boolean {
+  const defaults = DEFAULT_ROLE_PERMISSIONS[roleName] || [];
+  return defaults.includes(permissionKey);
+}
 
 // Group permissions by module for UI display
 export const PERMISSIONS_BY_MODULE = ALL_PERMISSIONS.reduce(

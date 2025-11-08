@@ -75,6 +75,20 @@ export class CustomersController {
     return this.customersService.update(id, body);
   }
 
+  // Add this method to CustomersController
+  @Get('stats')
+  @RequirePermissions('customers.view')
+  getStats() {
+    return this.customersService.getCustomerStats();
+  }
+
+  // Add this method to get customers by region
+  @Get('by-region/:regionId')
+  @RequirePermissions('customers.view')
+  getByRegion(@Param('regionId') regionId: string) {
+    return this.customersService.getCustomersByRegion(regionId);
+  }
+
   // ✅ UPDATED: Permission-based
   @Put(':id')
   @RequirePermissions('customers.edit')

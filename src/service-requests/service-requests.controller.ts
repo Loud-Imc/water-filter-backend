@@ -40,6 +40,8 @@ export class ServiceRequestsController {
   @Get(':id')
   @RequirePermissions('services.view')
   findOne(@Param('id') id: string) {
+
+    console.log("Hello from service-requests.controller.ts");
     return this.serviceRequestsService.findOne(id);
   }
 
@@ -133,5 +135,57 @@ export class ServiceRequestsController {
     @Body('technicianId') technicianId: string,
   ) {
     return this.serviceRequestsService.manualAssignTechnician(id, technicianId);
+  }
+
+  // ✅ ADD THESE ENDPOINTS:
+
+  @Post(':id/reassign-technician')
+  @RequirePermissions('services.assign')
+  async reassignTechnician(
+    @Param('id') id: string,
+    @Req() req,
+    @Body() body: { newTechnicianId: string; reason: string },
+  ) {
+    return this.serviceRequestsService.reassignTechnician(
+      id,
+      body.newTechnicianId,
+      req.user.userId,
+      body.reason,
+    );
+  }
+
+  @Get(':id/reassignment-history')
+  @RequirePermissions('services.view')
+  async getReassignmentHistory(@Param('id') id: string) {
+    return this.serviceRequestsService.getReassignmentHistory(id);
+  }
+
+  // ✅ ADD THESE ENDPOINTS:
+
+  @Post(':id/used-products')
+  @RequirePermissions('services.edit')
+  async addUsedProducts(
+    @Param('id') requestId: string,
+    @Req() req,
+    @Body()
+    body: {
+      usedProducts: Array<{
+        productId: string;
+        quantityUsed: number;
+        notes?: string;
+      }>;
+    },
+  ) {
+    return this.serviceRequestsService.addUsedProducts(
+      requestId,
+      req.user.userId,
+      body.usedProducts,
+    );
+  }
+
+  @Get(':id/used-products')
+  @RequirePermissions('services.view')
+  async getUsedProducts(@Param('id') requestId: string) {
+    return this.serviceRequestsService.getUsedProducts(requestId);
   }
 }

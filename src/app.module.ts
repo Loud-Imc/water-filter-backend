@@ -14,6 +14,7 @@ import { TechnicianWorkflowModule } from './technician-workflow/technician-workf
 import { TechniciansModule } from './technicians/technicians.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
+import { ProductsModule } from './products/products.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { join } from 'path';
     RegionModule,
     TechnicianWorkflowModule,
     TechniciansModule,
+    ProductsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
