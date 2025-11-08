@@ -72,7 +72,7 @@ async function main() {
 
   // 2. Create Regions (with new fields: state, district, city, pincode)
   console.log('📍 Creating regions...');
-  const regions = await prisma.region.createMany({
+  await prisma.region.createMany({
     data: [
       {
         name: 'Kerala - Ernakulam - Kochi - 682001',
