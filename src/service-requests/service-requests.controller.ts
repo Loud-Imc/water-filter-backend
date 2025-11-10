@@ -7,6 +7,7 @@ import {
   Patch,
   UseGuards,
   Req,
+  Query,
 } from '@nestjs/common';
 import { ServiceRequestsService } from './service-requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -15,6 +16,7 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequirePermissions } from '../auth/permissions.decorator';
+import { ReportQueryDto } from './dto/report-query.dto';
 
 // ✅ UPDATED: Added PermissionsGuard
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
@@ -25,8 +27,9 @@ export class ServiceRequestsController {
   // ✅ UPDATED: Permission-based
   @Post()
   @RequirePermissions('services.create')
-  create(@Body() dto: CreateServiceRequestDto) {
-    return this.serviceRequestsService.create(dto);
+  create(@Body() dto: CreateServiceRequestDto, @Req() req: any) {
+    const userId: any = req.user.userId;
+    return this.serviceRequestsService.create(dto, userId);
   }
 
   // ✅ UPDATED: Permission-based
@@ -40,18 +43,17 @@ export class ServiceRequestsController {
   @Get(':id')
   @RequirePermissions('services.view')
   findOne(@Param('id') id: string) {
-
-    console.log("Hello from service-requests.controller.ts");
+    console.log('Hello from service-requests.controller.ts');
     return this.serviceRequestsService.findOne(id);
   }
 
-  // ✅ Dashboard stats - anyone authenticated can see their own stats
-  @Get('dashboard/stats')
-  getDashboardStats(@Req() req: any) {
-    const userId = req.user.userId;
-    const userRole = req.user.roleName;
-    return this.serviceRequestsService.getDashboardStats(userId, userRole);
-  }
+  // // ✅ Dashboard stats - anyone authenticated can see their own stats
+  // @Get('dashboard/stats')
+  // getDashboardStats(@Req() req: any) {
+  //   const userId = req.user.userId;
+  //   const userRole = req.user.roleName;
+  //   return this.serviceRequestsService.getDashboardStats(userId, userRole);
+  // }
 
   // ✅ UPDATED: Permission-based
   @Patch(':id')
@@ -187,5 +189,62 @@ export class ServiceRequestsController {
   @RequirePermissions('services.view')
   async getUsedProducts(@Param('id') requestId: string) {
     return this.serviceRequestsService.getUsedProducts(requestId);
+  }
+
+  @Get('dashboard/stats')
+  getDashboardStats(@Req() req: any) {
+    const userId = req.user.userId;
+    const userRole = req.user.roleName;
+    return this.serviceRequestsService.getDashboardStats(userId, userRole);
+  }
+
+  // ✅ NEW: Comprehensive Reports with Date Range
+  @Get('reports/comprehensive')
+  @RequirePermissions('reports.view') // Only Super Admin
+  async getComprehensiveReport(@Query() query: ReportQueryDto) {
+    console.log('Generating Service Requests Report with query:', query);
+    return this.serviceRequestsService.getComprehensiveReport(query);
+  }
+
+  // ✅ NEW: Service Requests Report
+  @Get('reports/service-requests')
+  @RequirePermissions('reports.view')
+  async getServiceRequestsReport(@Query() query: ReportQueryDto) {
+    return this.serviceRequestsService.getServiceRequestsReport(query);
+  }
+
+  // ✅ NEW: Technician Performance Report
+  @Get('reports/technician-performance')
+  @RequirePermissions('reports.view')
+  async getTechnicianPerformanceReport(@Query() query: ReportQueryDto) {
+    return this.serviceRequestsService.getTechnicianPerformanceReport(query);
+  }
+
+  // ✅ NEW: Regional Breakdown Report
+  @Get('reports/regional-breakdown')
+  @RequirePermissions('reports.view')
+  async getRegionalBreakdownReport(@Query() query: ReportQueryDto) {
+    return this.serviceRequestsService.getRegionalBreakdownReport(query);
+  }
+
+  // ✅ NEW: Customer Activity Report
+  @Get('reports/customer-activity')
+  @RequirePermissions('reports.view')
+  async getCustomerActivityReport(@Query() query: ReportQueryDto) {
+    return this.serviceRequestsService.getCustomerActivityReport(query);
+  }
+
+  // ✅ NEW: Product Usage Report
+  @Get('reports/product-usage')
+  @RequirePermissions('reports.view')
+  async getProductUsageReport(@Query() query: ReportQueryDto) {
+    return this.serviceRequestsService.getProductUsageReport(query);
+  }
+
+  // ✅ ADD: Get technicians with workload
+  @Get('technicians/workload')
+  @RequirePermissions('services.view')
+  async getTechniciansWithWorkload(@Query('regionId') regionId?: string) {
+    return this.serviceRequestsService.getTechniciansWithWorkload(regionId);
   }
 }
