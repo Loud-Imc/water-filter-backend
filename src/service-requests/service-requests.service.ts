@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
+import { ReportQueryDto } from './dto/report-query.dto';
 
 @Injectable()
 export class ServiceRequestsService {
@@ -16,43 +17,43 @@ export class ServiceRequestsService {
     private notificationsService: NotificationsService,
   ) {}
 
-  async create(dto: CreateServiceRequestDto) {
-    const creator = await this.prisma.user.findUnique({
-      where: { id: dto.requestedById },
-      include: { role: true },
-    });
+  // async create(dto: CreateServiceRequestDto) {
+  //   const creator = await this.prisma.user.findUnique({
+  //     where: { id: dto.requestedById },
+  //     include: { role: true },
+  //   });
 
-    if (!creator) {
-      throw new NotFoundException('User not found');
-    }
+  //   if (!creator) {
+  //     throw new NotFoundException('User not found');
+  //   }
 
-    let initialStatus = 'PENDING_APPROVAL';
+  //   let initialStatus = 'PENDING_APPROVAL';
 
-    const salesRoles = ['Salesman', 'Sales Team Lead', 'Sales Manager'];
-    if (salesRoles.includes(creator.role.name)) {
-      initialStatus = 'PENDING_APPROVAL';
-    }
+  //   const salesRoles = ['Salesman', 'Sales Team Lead', 'Sales Manager'];
+  //   if (salesRoles.includes(creator.role.name)) {
+  //     initialStatus = 'PENDING_APPROVAL';
+  //   }
 
-    const request = await this.prisma.serviceRequest.create({
-      data: { ...dto, status: initialStatus as any },
-      include: {
-        customer: true,
-        region: true,
-        requestedBy: {
-          include: {
-            role: true,
-          },
-        },
-      },
-    });
+  //   const request = await this.prisma.serviceRequest.create({
+  //     data: { ...dto, status: initialStatus as any },
+  //     include: {
+  //       customer: true,
+  //       region: true,
+  //       requestedBy: {
+  //         include: {
+  //           role: true,
+  //         },
+  //       },
+  //     },
+  //   });
 
-    await this.notificationsService.notifyRequestCreated(
-      request.id,
-      dto.requestedById,
-    );
+  //   await this.notificationsService.notifyRequestCreated(
+  //     request.id,
+  //     dto.requestedById,
+  //   );
 
-    return request;
-  }
+  //   return request;
+  // }
 
   async findAll() {
     return this.prisma.serviceRequest.findMany({
@@ -733,5 +734,516 @@ export class ServiceRequestsService {
       },
       orderBy: { confirmedAt: 'desc' },
     });
+  }
+
+  // ✅ FIXED: Helper method to get date range
+  private getDateRange(query: ReportQueryDto) {
+    // Start date - beginning of the day (00:00:00)
+    const startDate = query.startDate
+      ? new Date(query.startDate)
+      : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+    // ✅ FIX: End date - end of the day (23:59:59.999)
+    let endDate: Date;
+    if (query.endDate) {
+      endDate = new Date(query.endDate);
+      // Set to end of day
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      endDate = new Date();
+      // Set to end of current day
+      endDate.setHours(23, 59, 59, 999);
+    }
+
+    return { startDate, endDate };
+  }
+
+  // ✅ NEW: Comprehensive Report (All-in-One)
+  async getComprehensiveReport(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    const [
+      serviceRequestsReport,
+      technicianPerformance,
+      regionalBreakdown,
+      customerActivity,
+      productUsage,
+    ] = await Promise.all([
+      this.getServiceRequestsReport(query),
+      this.getTechnicianPerformanceReport(query),
+      this.getRegionalBreakdownReport(query),
+      this.getCustomerActivityReport(query),
+      this.getProductUsageReport(query),
+    ]);
+
+    return {
+      period: {
+        startDate,
+        endDate,
+      },
+      serviceRequests: serviceRequestsReport,
+      technicianPerformance,
+      regionalBreakdown,
+      customerActivity,
+      productUsage,
+      generatedAt: new Date(),
+    };
+  }
+
+  // ✅ NEW: Service Requests Report
+  async getServiceRequestsReport(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    const baseWhere = {
+      createdAt: {
+        gte: startDate,
+        lte: endDate,
+      },
+      ...(query.regionId && { regionId: query.regionId }),
+    };
+
+    // Total requests
+    const total = await this.prisma.serviceRequest.count({
+      where: baseWhere,
+    });
+
+    // By status
+    const byStatus = await this.prisma.serviceRequest.groupBy({
+      by: ['status'],
+      where: baseWhere,
+      _count: true,
+    });
+
+    // By type
+    const byType = await this.prisma.serviceRequest.groupBy({
+      by: ['type'],
+      where: baseWhere,
+      _count: true,
+    });
+
+    // Completion rate
+    const completed = await this.prisma.serviceRequest.count({
+      where: { ...baseWhere, status: 'COMPLETED' },
+    });
+
+    // Average completion time (in days)
+    const completedRequests = await this.prisma.serviceRequest.findMany({
+      where: { ...baseWhere, status: 'COMPLETED' },
+      select: {
+        createdAt: true,
+        workLogs: {
+          select: { endTime: true },
+          orderBy: { endTime: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    const completionTimes = completedRequests
+      .filter((req) => req.workLogs[0]?.endTime)
+      .map((req) => {
+        const start = req.createdAt;
+        const end = req.workLogs[0].endTime!;
+        return (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24); // Days
+      });
+
+    const avgCompletionTime =
+      completionTimes.length > 0
+        ? completionTimes.reduce((a, b) => a + b, 0) / completionTimes.length
+        : 0;
+
+    return {
+      total,
+      byStatus: byStatus.map((item) => ({
+        status: item.status,
+        count: item._count,
+        percentage: ((item._count / total) * 100).toFixed(1),
+      })),
+      byType: byType.map((item) => ({
+        type: item.type,
+        count: item._count,
+        percentage: ((item._count / total) * 100).toFixed(1),
+      })),
+      completionRate: ((completed / total) * 100).toFixed(1),
+      avgCompletionTimeDays: avgCompletionTime.toFixed(1),
+    };
+  }
+
+  // ✅ NEW: Technician Performance Report
+  async getTechnicianPerformanceReport(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    const technicians = await this.prisma.user.findMany({
+      where: {
+        role: { name: 'Technician' },
+        ...(query.regionId && { regionId: query.regionId }),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        region: { select: { name: true } },
+      },
+    });
+
+    const performanceData = await Promise.all(
+      technicians.map(async (tech) => {
+        const assigned = await this.prisma.serviceRequest.count({
+          where: {
+            assignedToId: tech.id,
+            createdAt: { gte: startDate, lte: endDate },
+          },
+        });
+
+        const completed = await this.prisma.serviceRequest.count({
+          where: {
+            assignedToId: tech.id,
+            status: 'COMPLETED',
+            createdAt: { gte: startDate, lte: endDate },
+          },
+        });
+
+        const inProgress = await this.prisma.serviceRequest.count({
+          where: {
+            assignedToId: tech.id,
+            status: 'IN_PROGRESS',
+            createdAt: { gte: startDate, lte: endDate },
+          },
+        });
+
+        // Calculate average work duration
+        const workLogs = await this.prisma.workLog.findMany({
+          where: {
+            technicianId: tech.id,
+            startTime: { gte: startDate, lte: endDate },
+            endTime: { not: null },
+          },
+          select: { duration: true },
+        });
+
+        const avgDuration =
+          workLogs.length > 0
+            ? workLogs.reduce((sum, log) => sum + (log.duration || 0), 0) /
+              workLogs.length
+            : 0;
+
+        return {
+          technicianId: tech.id,
+          name: tech.name,
+          email: tech.email,
+          region: tech.region?.name || 'N/A',
+          assigned,
+          completed,
+          inProgress,
+          completionRate:
+            assigned > 0 ? ((completed / assigned) * 100).toFixed(1) : '0',
+          avgWorkDurationHours: (avgDuration / 60).toFixed(1), // Convert minutes to hours
+        };
+      }),
+    );
+
+    return performanceData.sort((a, b) => b.completed - a.completed);
+  }
+
+  // ✅ NEW: Regional Breakdown Report
+  async getRegionalBreakdownReport(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    const regions = await this.prisma.region.findMany({
+      select: {
+        id: true,
+        name: true,
+        district: true,
+        city: true,
+      },
+    });
+
+    const regionalData = await Promise.all(
+      regions.map(async (region) => {
+        const requests = await this.prisma.serviceRequest.count({
+          where: {
+            regionId: region.id,
+            createdAt: { gte: startDate, lte: endDate },
+          },
+        });
+
+        const completed = await this.prisma.serviceRequest.count({
+          where: {
+            regionId: region.id,
+            status: 'COMPLETED',
+            createdAt: { gte: startDate, lte: endDate },
+          },
+        });
+
+        const customers = await this.prisma.customer.count({
+          where: { regionId: region.id },
+        });
+
+        const technicians = await this.prisma.user.count({
+          where: {
+            regionId: region.id,
+            role: { name: 'Technician' },
+          },
+        });
+
+        return {
+          regionId: region.id,
+          name: region.name,
+          district: region.district,
+          city: region.city,
+          totalRequests: requests,
+          completedRequests: completed,
+          completionRate:
+            requests > 0 ? ((completed / requests) * 100).toFixed(1) : '0',
+          totalCustomers: customers,
+          totalTechnicians: technicians,
+        };
+      }),
+    );
+
+    return regionalData.sort((a, b) => b.totalRequests - a.totalRequests);
+  }
+
+  // ✅ NEW: Customer Activity Report
+  async getCustomerActivityReport(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    // New customers in period
+    const newCustomers = await this.prisma.customer.count({
+      where: {
+        createdAt: { gte: startDate, lte: endDate },
+        ...(query.regionId && { regionId: query.regionId }),
+      },
+    });
+
+    // Total customers
+    const totalCustomers = await this.prisma.customer.count({
+      where: query.regionId ? { regionId: query.regionId } : {},
+    });
+
+    // Top customers by service count
+    const topCustomers = await this.prisma.customer.findMany({
+      where: query.regionId ? { regionId: query.regionId } : {},
+      select: {
+        id: true,
+        name: true,
+        primaryPhone: true,
+        region: { select: { name: true } },
+        requests: {
+          where: {
+            createdAt: { gte: startDate, lte: endDate },
+          },
+          select: { id: true, status: true },
+        },
+      },
+      take: 10,
+    });
+
+    const topCustomersWithStats = topCustomers
+      .map((customer) => ({
+        customerId: customer.id,
+        name: customer.name,
+        phone: customer.primaryPhone,
+        region: customer.region?.name || 'N/A',
+        totalServices: customer.requests.length,
+        completedServices: customer.requests.filter(
+          (r) => r.status === 'COMPLETED',
+        ).length,
+      }))
+      .sort((a, b) => b.totalServices - a.totalServices);
+
+    // Average services per customer
+    const avgServicesPerCustomer =
+      totalCustomers > 0
+        ? (
+            (await this.prisma.serviceRequest.count({
+              where: {
+                createdAt: { gte: startDate, lte: endDate },
+                ...(query.regionId && { regionId: query.regionId }),
+              },
+            })) / totalCustomers
+          ).toFixed(2)
+        : '0';
+
+    return {
+      newCustomers,
+      totalCustomers,
+      avgServicesPerCustomer,
+      topCustomers: topCustomersWithStats,
+    };
+  }
+
+  // ✅ NEW: Product Usage Report
+  async getProductUsageReport(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    // Most used products
+    const productUsage = await this.prisma.serviceUsedProduct.groupBy({
+      by: ['productId'],
+      where: {
+        confirmedAt: { gte: startDate, lte: endDate },
+      },
+      _sum: {
+        quantityUsed: true,
+      },
+      _count: true,
+    });
+
+    const productDetails: any = await Promise.all(
+      productUsage.map(async (usage) => {
+        const product: any = await this.prisma.product.findUnique({
+          where: { id: usage.productId },
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            price: true,
+            stock: true,
+          },
+        });
+
+        return {
+          productId: usage.productId,
+          name: product?.name || 'Unknown',
+          sku: product?.sku || 'N/A',
+          currentStock: product?.stock || 0,
+          totalQuantityUsed: usage._sum.quantityUsed || 0,
+          timesUsed: usage._count,
+          estimatedValue:
+            (product?.price || 0) * (usage._sum.quantityUsed || 0),
+        };
+      }),
+    );
+
+    // Low stock products
+    const lowStockProducts = await this.prisma.product.findMany({
+      where: {
+        stock: { lte: 5 },
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        stock: true,
+        price: true,
+      },
+      take: 10,
+    });
+
+    // Total product value consumed
+    const totalValueConsumed = productDetails.reduce(
+      (sum, p) => sum + Number(p.estimatedValue),
+      0,
+    );
+
+    return {
+      mostUsedProducts: productDetails
+        .sort((a, b) => b.totalQuantityUsed - a.totalQuantityUsed)
+        .slice(0, 10),
+      lowStockProducts,
+      totalValueConsumed: totalValueConsumed.toFixed(2),
+      totalProductsUsed: productUsage.length,
+    };
+  }
+
+  // ✅ ADD this method to ServiceRequestsService class
+
+  async getTechnicianWorkload(technicianId: string): Promise<number> {
+    // Count pending tasks (ASSIGNED + IN_PROGRESS)
+    return this.prisma.serviceRequest.count({
+      where: {
+        assignedToId: technicianId,
+        status: {
+          in: ['ASSIGNED', 'IN_PROGRESS'],
+        },
+      },
+    });
+  }
+
+  // ✅ ADD: Get all technicians with their workload
+  async getTechniciansWithWorkload(regionId?: string) {
+    const technicians = await this.prisma.user.findMany({
+      where: {
+        role: { name: 'Technician' },
+        status: 'ACTIVE',
+        ...(regionId && { regionId }),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        region: {
+          select: { name: true },
+        },
+      },
+    });
+
+    // Get workload for each technician
+    const techniciansWithWorkload = await Promise.all(
+      technicians.map(async (tech) => {
+        const pendingCount = await this.getTechnicianWorkload(tech.id);
+        return {
+          ...tech,
+          pendingTasks: pendingCount,
+        };
+      }),
+    );
+
+    // Sort by workload (least busy first)
+    return techniciansWithWorkload.sort(
+      (a, b) => a.pendingTasks - b.pendingTasks,
+    );
+  }
+
+  // ✅ UPDATE: Create method to handle new workflow
+  async create(dto: CreateServiceRequestDto, userId: string) {
+    // Validate that assigned technician exists and is active
+    const technician = await this.prisma.user.findFirst({
+      where: {
+        id: dto.assignedToId,
+        role: { name: 'Technician' },
+        status: 'ACTIVE',
+      },
+    });
+
+    if (!technician) {
+      throw new NotFoundException(
+        'Invalid technician or technician is not active',
+      );
+    }
+
+    // Create service request with ASSIGNED status directly
+    const serviceRequest = await this.prisma.serviceRequest.create({
+      data: {
+        type: dto.type,
+        description: dto.description,
+        customerId: dto.customerId,
+        regionId: dto.regionId,
+        requestedById: userId,
+        assignedToId: dto.assignedToId, // ✅ Assign directly
+        priority: dto.priority || 'NORMAL', // ✅ Set priority
+        status: 'ASSIGNED', // ✅ Skip DRAFT, PENDING_APPROVAL, APPROVED
+      },
+      include: {
+        customer: true,
+        region: true,
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        requestedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return serviceRequest;
   }
 }

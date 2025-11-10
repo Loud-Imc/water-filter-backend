@@ -1,8 +1,24 @@
-import { IsEnum, IsString, IsNotEmpty, IsOptional } from 'class-validator';
-import { RequestType } from '@prisma/client';
+import { IsString, IsNotEmpty, IsEnum, IsOptional } from 'class-validator';
+
+export enum RequestType {
+  SERVICE = 'SERVICE',
+  INSTALLATION = 'INSTALLATION',
+  RE_INSTALLATION = 'RE_INSTALLATION',
+  COMPLAINT = 'COMPLAINT',
+  ENQUIRY = 'ENQUIRY',
+}
+
+// ✅ NEW: Priority enum
+export enum ServicePriority {
+  HIGH = 'HIGH',
+  MEDIUM = 'MEDIUM',
+  NORMAL = 'NORMAL',
+  LOW = 'LOW',
+}
 
 export class CreateServiceRequestDto {
   @IsEnum(RequestType)
+  @IsNotEmpty()
   type: RequestType;
 
   @IsString()
@@ -11,13 +27,24 @@ export class CreateServiceRequestDto {
 
   @IsString()
   @IsNotEmpty()
-  requestedById: string;
+  customerId: string;
 
   @IsString()
   @IsNotEmpty()
   regionId: string;
 
+  // ✅ NEW: Priority field (optional, defaults to NORMAL)
+  @IsEnum(ServicePriority)
+  @IsOptional()
+  priority?: ServicePriority;
+
+  // ✅ NEW: Direct assignment during creation
   @IsString()
   @IsNotEmpty()
-  customerId: string;
+  assignedToId: string;
+
+  // ✅ NEW: Optional notes for admin
+  @IsString()
+  @IsOptional()
+  adminNotes?: string;
 }

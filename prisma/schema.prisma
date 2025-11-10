@@ -32,6 +32,13 @@ enum UserStatus {
   SUSPENDED
 }
 
+enum ServicePriority {
+  HIGH
+  MEDIUM
+  NORMAL
+  LOW
+}
+
 model Region {
   id              String           @id @default(uuid())
   name            String           @unique  // Required: Display name (e.g., "Kottayam - Pala - 686575")
@@ -128,17 +135,18 @@ model Customer {
 
 
 model ServiceRequest {
-  id            String       @id @default(uuid())
+  id            String          @id @default(uuid())
   type          RequestType
   description   String
-  status        RequestStatus @default(DRAFT)
+  status        RequestStatus   @default(ASSIGNED)  // ✅ Changed default from DRAFT
+  priority      ServicePriority @default(NORMAL)    // ✅ NEW field
   requestedById String
-  approvedById  String?      // Final approver
-  assignedToId  String?
+  approvedById  String?
+  assignedToId  String?         // ✅ Now required during creation
   regionId      String
   customerId    String
-  createdAt     DateTime     @default(now())
-  salesApproved Boolean      @default(false)
+  createdAt     DateTime        @default(now())
+  salesApproved Boolean         @default(false)
   
   acknowledgedById           String?
   acknowledgedAt             DateTime?
