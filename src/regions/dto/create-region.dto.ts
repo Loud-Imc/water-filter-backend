@@ -11,6 +11,10 @@ export class CreateRegionDto {
 
   @IsString()
   @IsOptional()
+  taluk?: string; // Optional: "Kottayam"
+
+  @IsString()
+  @IsOptional()
   district?: string; // Optional: "Kottayam"
 
   @IsString()
