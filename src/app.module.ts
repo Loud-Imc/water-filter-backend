@@ -15,6 +15,7 @@ import { TechniciansModule } from './technicians/technicians.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { ProductsModule } from './products/products.module';
+import { InstallationsModule } from './installations/installations.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { ProductsModule } from './products/products.module';
     PrismaModule,
     RegionModule,
     TechnicianWorkflowModule,
+    InstallationsModule,
     TechniciansModule,
     ProductsModule,
   ],

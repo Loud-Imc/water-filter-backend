@@ -8,7 +8,6 @@ export enum RequestType {
   ENQUIRY = 'ENQUIRY',
 }
 
-// ✅ NEW: Priority enum
 export enum ServicePriority {
   HIGH = 'HIGH',
   MEDIUM = 'MEDIUM',
@@ -33,17 +32,19 @@ export class CreateServiceRequestDto {
   @IsNotEmpty()
   regionId: string;
 
-  // ✅ NEW: Priority field (optional, defaults to NORMAL)
+  // ✅ NEW: Installation field
+  @IsString()
+  @IsOptional()
+  installationId?: string;
+
   @IsEnum(ServicePriority)
   @IsOptional()
   priority?: ServicePriority;
 
-  // ✅ NEW: Direct assignment during creation
   @IsString()
   @IsNotEmpty()
   assignedToId: string;
 
-  // ✅ NEW: Optional notes for admin
   @IsString()
   @IsOptional()
   adminNotes?: string;

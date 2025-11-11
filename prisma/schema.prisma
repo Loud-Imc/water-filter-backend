@@ -41,17 +41,19 @@ enum ServicePriority {
 
 model Region {
   id              String           @id @default(uuid())
-  name            String           @unique  // Required: Display name (e.g., "Kottayam - Pala - 686575")
-  state           String?          // Optional: "Kerala"
-  district        String?          // Optional: "Kottayam"
-  city            String?          // Optional: "Pala"
-  pincode         String?          // Optional: "686575"
+  name            String           @unique
+  state           String?
+  district        String?
+  taluk           String?          // ✅ NEW: Add taluk/tehsil field
+  city            String?
+  pincode         String?
   
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   
   technicians     User[]
   customers       Customer[]
+  installations   Installation[]   // ✅ NEW: Add installations relation
   serviceRequests ServiceRequest[]
   
   @@index([state])
@@ -59,6 +61,44 @@ model Region {
   @@index([pincode])
 }
 
+model Installation {
+  id                String          @id @default(uuid())
+  customerId        String
+  regionId          String
+  
+  // Location details
+  name              String          // e.g., "Main Office", "Branch 1", "Warehouse"
+  address           String
+  landmark          String?
+  
+  // Contact (optional - can be different from customer's main contact)
+  contactPerson     String?
+  contactPhone      String?
+  
+  // Location coordinates
+  latitude          Float?
+  longitude         Float?
+  googleMapsUrl     String?
+  
+  // Installation-specific details
+  installationType  String?         // e.g., "Residential", "Commercial", "Industrial"
+  notes             String?
+  
+  isActive          Boolean         @default(true)
+  isPrimary         Boolean         @default(false) // Mark default installation
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  customer          Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  region            Region          @relation(fields: [regionId], references: [id])
+  serviceRequests   ServiceRequest[]
+  
+  @@index([customerId])
+  @@index([regionId])
+  @@index([isActive])
+}
 
 model Role {
   id String @id @default(uuid())
@@ -113,20 +153,21 @@ model User {
 // schema.prisma
 
 model Customer {
-  id            String   @id @default(uuid())
+  id            String          @id @default(uuid())
   name          String
-  address       String
-  primaryPhone  String   @unique // Main contact number
-  phoneNumbers  String[] // Additional phone numbers (array)
+  address       String          // Keep as primary/default address
+  primaryPhone  String          @unique
+  phoneNumbers  String[]
   email         String?
   regionId      String
-  latitude      Float?   // For Google Maps
-  longitude     Float?   // For Google Maps
-  googleMapsUrl String?  // Optional: store Google Maps link
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  latitude      Float?
+  longitude     Float?
+  googleMapsUrl String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
   
   region        Region          @relation(fields: [regionId], references: [id])
+  installations Installation[]  // ✅ NEW: Multiple installations
   requests      ServiceRequest[]
   
   @@index([regionId])
@@ -138,33 +179,38 @@ model ServiceRequest {
   id            String          @id @default(uuid())
   type          RequestType
   description   String
-  status        RequestStatus   @default(ASSIGNED)  // ✅ Changed default from DRAFT
-  priority      ServicePriority @default(NORMAL)    // ✅ NEW field
+  status        RequestStatus   @default(ASSIGNED)
+  priority      ServicePriority @default(NORMAL)
   requestedById String
   approvedById  String?
-  assignedToId  String?         // ✅ Now required during creation
+  assignedToId  String?
   regionId      String
   customerId    String
+  installationId String?        // ✅ NEW: Optional installation reference
   createdAt     DateTime        @default(now())
   salesApproved Boolean         @default(false)
   
   acknowledgedById           String?
   acknowledgedAt             DateTime?
   acknowledgmentComments     String?
+  
   usedProducts               ServiceUsedProduct[]
-
   reassignmentHistory        ReassignmentHistory[]
+  
   requestedBy   User         @relation("Requester", fields: [requestedById], references: [id])
   approvedBy    User?        @relation("Approver", fields: [approvedById], references: [id])
   assignedTo    User?        @relation("TechnicianAssigned", fields: [assignedToId], references: [id])
-
   acknowledgedBy User?       @relation("AcknowledgedBy", fields: [acknowledgedById], references: [id])
   
   region        Region       @relation(fields: [regionId], references: [id])
   customer      Customer     @relation(fields: [customerId], references: [id])
+  installation  Installation? @relation(fields: [installationId], references: [id]) // ✅ NEW
+  
   workLogs      WorkLog[]
   workMedia     WorkMedia[]
   approvalHistory ApprovalHistory[]
+  
+  @@index([installationId])  // ✅ NEW: Add index for performance
 }
 
 
