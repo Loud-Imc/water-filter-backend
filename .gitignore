@@ -12,10 +12,9 @@ pnpm-lock.yaml
 *.db
 *.sqlite
 
-# NEW (use this):
+# Uploads
 uploads/*
 !uploads/.gitkeep
-# Allow src/uploads module
 !src/uploads/
 
 # Build output
@@ -39,6 +38,4 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Prisma
-prisma/migrations/*
-!prisma/migrations/.gitkeep
+# ✅ REMOVED: prisma/migrations/* - We NEED to track migrations!
