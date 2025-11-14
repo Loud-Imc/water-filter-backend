@@ -736,6 +736,176 @@ export class ServiceRequestsService {
     });
   }
 
+  // ✅ NEW METHOD: Get customer service history for technician
+  // Add this method to your ServiceRequestsService class
+  async getCustomerServiceHistory(serviceRequestId: string) {
+    // 1. Get the service request to extract customer info
+    const serviceRequest = await this.prisma.serviceRequest.findUnique({
+      where: { id: serviceRequestId },
+      select: {
+        id: true,
+        customerId: true,
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            primaryPhone: true,
+            email: true,
+            address: true,
+            createdAt: true,
+            region: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!serviceRequest) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    const customerId = serviceRequest.customerId;
+
+    // 2. Fetch all service history for this customer (excluding DRAFT)
+    const serviceHistory = await this.prisma.serviceRequest.findMany({
+      where: {
+        customerId: customerId,
+        status: {
+          not: 'DRAFT', // Exclude drafts from history
+        },
+      },
+      include: {
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        requestedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        region: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        installation: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            contactPerson: true,
+            contactPhone: true,
+          },
+        },
+        workMedia: {
+          select: {
+            id: true,
+            fileUrl: true,
+            uploadedAt: true,
+          },
+          orderBy: {
+            uploadedAt: 'desc',
+          },
+        },
+        usedProducts: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                price: true,
+              },
+            },
+            confirmedUser: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+        approvalHistory: {
+          include: {
+            approver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
+          orderBy: {
+            approvedAt: 'desc',
+          },
+        },
+        workLogs: {
+          select: {
+            id: true,
+            startTime: true,
+            endTime: true,
+            duration: true,
+            notes: true,
+          },
+          orderBy: {
+            startTime: 'desc',
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc', // Most recent first
+      },
+    });
+
+    // 3. Calculate statistics (matching your pattern from reports)
+    const statistics = {
+      totalServices: serviceHistory.length,
+      installations: await this.prisma.serviceRequest.count({
+        where: { customerId, type: 'INSTALLATION' },
+      }),
+      reInstallations: await this.prisma.serviceRequest.count({
+        where: { customerId, type: 'RE_INSTALLATION' },
+      }),
+      services: await this.prisma.serviceRequest.count({
+        where: { customerId, type: 'SERVICE' },
+      }),
+      complaints: await this.prisma.serviceRequest.count({
+        where: { customerId, type: 'COMPLAINT' },
+      }),
+      enquiries: await this.prisma.serviceRequest.count({
+        where: { customerId, type: 'ENQUIRY' },
+      }),
+      completedServices: await this.prisma.serviceRequest.count({
+        where: {
+          customerId,
+          status: 'COMPLETED',
+        },
+      }),
+      lastService:
+        serviceHistory.length > 0
+          ? serviceHistory[0].createdAt.toISOString()
+          : null,
+    };
+
+    // 4. Return data in same format as admin's customer history endpoint
+    return {
+      customer: serviceRequest.customer,
+      serviceHistory,
+      statistics,
+    };
+  }
+
   // ✅ FIXED: Helper method to get date range
   private getDateRange(query: ReportQueryDto) {
     // Start date - beginning of the day (00:00:00)

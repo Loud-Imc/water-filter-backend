@@ -156,6 +156,14 @@ export class ServiceRequestsController {
     );
   }
 
+  @Get(':id/customer-service-history')
+  @RequirePermissions('services.view')
+  getCustomerServiceHistory(@Param('id') serviceRequestId: string) {
+    return this.serviceRequestsService.getCustomerServiceHistory(
+      serviceRequestId,
+    );
+  }
+
   @Get(':id/reassignment-history')
   @RequirePermissions('services.view')
   async getReassignmentHistory(@Param('id') id: string) {
