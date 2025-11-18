@@ -35,7 +35,7 @@ export class CreateServiceRequestDto {
   // ✅ NEW: Installation field
   @IsString()
   @IsOptional()
-  installationId?: string;
+  installationId?: string | null;
 
   @IsEnum(ServicePriority)
   @IsOptional()
@@ -48,4 +48,8 @@ export class CreateServiceRequestDto {
   @IsString()
   @IsOptional()
   adminNotes?: string;
+
+  @IsString()
+  @IsOptional()
+  categoryId?: string | null;
 }

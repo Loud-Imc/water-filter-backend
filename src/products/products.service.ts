@@ -21,13 +21,39 @@ export class ProductsService {
       }
     }
 
-    return this.prisma.product.create({ data });
+    // ✅ NEW: Validate category exists if provided
+    if (data.categoryId) {
+      const category = await this.prisma.productCategory.findUnique({
+        where: { id: data.categoryId },
+      });
+
+      if (!category) {
+        throw new NotFoundException('Product category not found');
+      }
+
+      if (!category.isActive) {
+        throw new BadRequestException(
+          'Cannot assign product to inactive category',
+        );
+      }
+    }
+
+    return this.prisma.product.create({
+      data,
+      include: {
+        category: true, // ✅ NEW: Include category in response
+      },
+    });
   }
 
-  async findAll() {
+  async findAll(categoryId?: string) {
+    const where = categoryId ? { categoryId } : {};
+
     return this.prisma.product.findMany({
+      where,
       orderBy: { name: 'asc' },
       include: {
+        category: true, // ✅ NEW: Include category
         _count: {
           select: {
             stockHistory: true,
@@ -41,9 +67,10 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
+        category: true, // ✅ NEW: Include category
         stockHistory: {
           orderBy: { createdAt: 'desc' },
-          take: 5, // Last 5 stock changes
+          take: 10, // Last 10 stock changes
         },
       },
     });
@@ -55,8 +82,44 @@ export class ProductsService {
     return product;
   }
 
+  // ✅ NEW: Get products by category
+  async getByCategory(categoryId: string) {
+    const category = await this.prisma.productCategory.findUnique({
+      where: { id: categoryId },
+    });
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    return this.prisma.product.findMany({
+      where: { categoryId },
+      orderBy: { name: 'asc' },
+      include: {
+        category: true,
+      },
+    });
+  }
+
   async update(id: string, data: UpdateProductDto) {
     await this.findOne(id); // Check if exists
+
+    // ✅ NEW: Validate category if being updated
+    if (data.categoryId) {
+      const category = await this.prisma.productCategory.findUnique({
+        where: { id: data.categoryId },
+      });
+
+      if (!category) {
+        throw new NotFoundException('Product category not found');
+      }
+
+      if (!category.isActive) {
+        throw new BadRequestException(
+          'Cannot assign product to inactive category',
+        );
+      }
+    }
 
     if (data.hasWarranty === false) {
       // Clear warranty fields if warranty is disabled
@@ -67,28 +130,48 @@ export class ProductsService {
           warrantyMonths: null,
           warrantyYears: null,
         },
+        include: {
+          category: true, // ✅ NEW
+        },
       });
     }
 
-    return this.prisma.product.update({ where: { id }, data });
+    return this.prisma.product.update({
+      where: { id },
+      data,
+      include: {
+        category: true, // ✅ NEW
+      },
+    });
   }
 
   async delete(id: string) {
     await this.findOne(id);
+
+    // ✅ NEW: Check if product is used in any BOM templates
+    const bomUsage = await this.prisma.bOMTemplate.count({
+      where: { productId: id },
+    });
+
+    if (bomUsage > 0) {
+      throw new BadRequestException(
+        'Cannot delete product because it has BOM template(s). Delete BOM templates first.',
+      );
+    }
+
+    // Check if product is used in service requests
+    const serviceUsage = await this.prisma.serviceUsedProduct.count({
+      where: { productId: id },
+    });
+
+    if (serviceUsage > 0) {
+      throw new BadRequestException(
+        'Cannot delete product because it has been used in service requests',
+      );
+    }
+
     return this.prisma.product.delete({ where: { id } });
   }
-
-  // Get low stock products (stock < 5)
-//   async getLowStockProducts() {
-//     return this.prisma.product.findMany({
-//       where: {
-//         stock: {
-//           lt: 5,
-//         },
-//       },
-//       orderBy: { stock: 'asc' },
-//     });
-//   }
 
   // Update stock
   async updateStock(id: string, quantityChange: number, reason: string) {
@@ -106,8 +189,8 @@ export class ProductsService {
       data: { stock: newStock },
     });
 
-    // Log to stock history
-    await this.prisma.stockHistory.create({
+    // Log to stock history (using ProductStockHistory, not StockHistory)
+    await this.prisma.productStockHistory.create({
       data: {
         productId: id,
         quantityChange,
@@ -118,8 +201,7 @@ export class ProductsService {
     return { newStock, message: `Stock updated: ${reason}` };
   }
 
-  // Add these methods:
-
+  // System settings helper methods
   async getSystemSetting(key: string) {
     const setting = await this.prisma.systemSetting.findUnique({
       where: { key },
@@ -164,6 +246,9 @@ export class ProductsService {
         },
       },
       orderBy: { stock: 'asc' },
+      include: {
+        category: true, // ✅ NEW
+      },
     });
   }
 
@@ -182,6 +267,7 @@ export class ProductsService {
   }
 
   async getFilteredProducts(filters: {
+    categoryId?: string; // ✅ NEW
     company?: string;
     minPrice?: number;
     maxPrice?: number;
@@ -193,18 +279,24 @@ export class ProductsService {
   }) {
     const where: any = {};
 
+    // ✅ NEW: Filter by category
+    if (filters.categoryId) where.categoryId = filters.categoryId;
+
     if (filters.company) where.company = filters.company;
+
     if (filters.searchTerm) {
       where.OR = [
         { name: { contains: filters.searchTerm, mode: 'insensitive' } },
         { sku: { contains: filters.searchTerm, mode: 'insensitive' } },
       ];
     }
+
     if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
       where.price = {};
       if (filters.minPrice !== undefined) where.price.gte = filters.minPrice;
       if (filters.maxPrice !== undefined) where.price.lte = filters.maxPrice;
     }
+
     if (filters.minStock !== undefined || filters.maxStock !== undefined) {
       where.stock = {};
       if (filters.minStock !== undefined) where.stock.gte = filters.minStock;
@@ -215,6 +307,9 @@ export class ProductsService {
       where,
       orderBy: {
         [filters.sortBy || 'name']: filters.sortOrder || 'asc',
+      },
+      include: {
+        category: true, // ✅ NEW
       },
     });
   }

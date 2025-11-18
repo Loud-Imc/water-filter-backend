@@ -30,8 +30,9 @@ export class ProductsController {
   }
 
   @Get()
-  findAll() {
-    return this.productsService.findAll();
+  @RequirePermissions('products.view')
+  findAll(@Query('categoryId') categoryId?: string) {
+    return this.productsService.findAll(categoryId);
   }
 
   @Get('low-stock')
@@ -49,7 +50,7 @@ export class ProductsController {
   }
 
   @Put('low-stock-threshold')
-  @RequirePermissions('products.edit')
+  @RequirePermissions('products.update')
   async setLowStockThreshold(@Body() body: { threshold: number }, @Req() req) {
     await this.productsService.setLowStockThreshold(
       body.threshold,
@@ -71,6 +72,7 @@ export class ProductsController {
   async getFiltered(@Query() filters: any) {
     console.log('filtered ', filters);
     return this.productsService.getFilteredProducts({
+      categoryId: filters.categoryId, // ✅ NEW: Filter by category
       company: filters.company,
       minPrice: filters.minPrice ? Number(filters.minPrice) : undefined,
       maxPrice: filters.maxPrice ? Number(filters.maxPrice) : undefined,
@@ -80,6 +82,13 @@ export class ProductsController {
       sortBy: filters.sortBy,
       sortOrder: filters.sortOrder,
     });
+  }
+
+  // ✅ NEW: Get products by category
+  @Get('by-category/:categoryId')
+  @RequirePermissions('products.view')
+  getByCategory(@Param('categoryId') categoryId: string) {
+    return this.productsService.getByCategory(categoryId);
   }
 
   @Get(':id')

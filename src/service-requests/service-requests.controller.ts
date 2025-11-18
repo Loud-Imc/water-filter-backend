@@ -172,6 +172,27 @@ export class ServiceRequestsController {
 
   // ✅ ADD THESE ENDPOINTS:
 
+  // @Post(':id/used-products')
+  // @RequirePermissions('services.edit')
+  // async addUsedProducts(
+  //   @Param('id') requestId: string,
+  //   @Req() req,
+  //   @Body()
+  //   body: {
+  //     usedProducts: Array<{
+  //       productId: string;
+  //       quantityUsed: number;
+  //       notes?: string;
+  //     }>;
+  //   },
+  // ) {
+  //   return this.serviceRequestsService.addUsedProducts(
+  //     requestId,
+  //     req.user.userId,
+  //     body.usedProducts,
+  //   );
+  // }
+
   @Post(':id/used-products')
   @RequirePermissions('services.edit')
   async addUsedProducts(
@@ -179,18 +200,25 @@ export class ServiceRequestsController {
     @Req() req,
     @Body()
     body: {
-      usedProducts: Array<{
-        productId: string;
+      usedItems: Array<{
+        type: 'product' | 'sparePart';
+        id: string;
         quantityUsed: number;
         notes?: string;
       }>;
     },
   ) {
-    return this.serviceRequestsService.addUsedProducts(
+    return this.serviceRequestsService.addUsedItems(
       requestId,
       req.user.userId,
-      body.usedProducts,
+      body.usedItems,
     );
+  }
+
+  @Get(':id/used-spare-parts')
+  @RequirePermissions('services.view')
+  getUsedSpareParts(@Param('id') requestId: string) {
+    return this.serviceRequestsService.getUsedSpareParts(requestId);
   }
 
   @Get(':id/used-products')

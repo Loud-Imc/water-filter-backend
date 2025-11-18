@@ -7,12 +7,16 @@ generator client {
   provider = "prisma-client-js"
 }
 
+
+// ============================================
+// ENUMS
+// ============================================
 enum RequestType {
   SERVICE
   INSTALLATION
   RE_INSTALLATION
   COMPLAINT
-  ENQUIRY   
+  ENQUIRY
 }
 
 enum RequestStatus {
@@ -39,322 +43,497 @@ enum ServicePriority {
   LOW
 }
 
+// ============================================
+// CORE MODELS (Keep as-is)
+// ============================================
 model Region {
-  id              String           @id @default(uuid())
-  name            String           @unique
-  state           String?
-  district        String?
-  taluk           String?          // ✅ NEW: Add taluk/tehsil field
-  city            String?
-  pincode         String?
-  
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  
+  id       String  @id @default(uuid())
+  name     String  @unique
+  state    String?
+  district String?
+  taluk    String?
+  city     String?
+  pincode  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   technicians     User[]
   customers       Customer[]
-  installations   Installation[]   // ✅ NEW: Add installations relation
+  installations   Installation[]
   serviceRequests ServiceRequest[]
-  
+
   @@index([state])
   @@index([district])
   @@index([pincode])
 }
 
-model Installation {
-  id                String          @id @default(uuid())
-  customerId        String
-  regionId          String
-  
-  // Location details
-  name              String          // e.g., "Main Office", "Branch 1", "Warehouse"
-  address           String
-  landmark          String?
-  
-  // Contact (optional - can be different from customer's main contact)
-  contactPerson     String?
-  contactPhone      String?
-  
-  // Location coordinates
-  latitude          Float?
-  longitude         Float?
-  googleMapsUrl     String?
-  
-  // Installation-specific details
-  installationType  String?         // e.g., "Residential", "Commercial", "Industrial"
-  notes             String?
-  
-  isActive          Boolean         @default(true)
-  isPrimary         Boolean         @default(false) // Mark default installation
-  
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  
-  // Relations
-  customer          Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  region            Region          @relation(fields: [regionId], references: [id])
-  serviceRequests   ServiceRequest[]
-  
-  @@index([customerId])
-  @@index([regionId])
-  @@index([isActive])
-}
-
 model Role {
-  id String @id @default(uuid())
+  id          String  @id @default(uuid())
   name        String
   parentRole  String?
   permissions Json
-  immutable   Boolean @default(false) // true for Super Admin
+  immutable   Boolean @default(false)
   users       User[]
 }
 
-
-
 model User {
-  id          String    @id @default(uuid())
-  name        String
-  email       String    @unique
-  password    String
-  phone       String?
-  refreshToken String?
-  roleId      String
-  regionId    String?
-  status      UserStatus @default(ACTIVE)
-  isExternal  Boolean    @default(false)
-  createdById String?
-  createdAt   DateTime   @default(now())
-  approvalHistory ApprovalHistory[]
+  id              String     @id @default(uuid())
+  name            String
+  email           String     @unique
+  password        String
+  phone           String?
+  refreshToken    String?
+  roleId          String
+  regionId        String?
+  status          UserStatus @default(ACTIVE)
+  isExternal      Boolean    @default(false)
+  createdById     String?
+  createdAt       DateTime   @default(now())
+  customPermissions Json?
 
-  role        Role       @relation(fields: [roleId], references: [id])
-  region      Region?    @relation(fields: [regionId], references: [id])
-  createdBy   User?      @relation("UserCreator", fields: [createdById], references: [id])
-  createdUsers User[]    @relation("UserCreator")
+  role         Role    @relation(fields: [roleId], references: [id])
+  region       Region? @relation(fields: [regionId], references: [id])
+  createdBy    User?   @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers User[]  @relation("UserCreator")
 
+  requestedRequests     ServiceRequest[]     @relation("Requester")
+  approvedRequests      ServiceRequest[]     @relation("Approver")
+  assignedRequests      ServiceRequest[]     @relation("TechnicianAssigned")
+  acknowledgedRequests  ServiceRequest[]     @relation("AcknowledgedBy")
   confirmedUsedProducts ServiceUsedProduct[] @relation("confirmedBy")
-  requestedRequests     ServiceRequest[]  @relation("Requester")
-  approvedRequests      ServiceRequest[]  @relation("Approver")
-  assignedRequests      ServiceRequest[]  @relation("TechnicianAssigned")
-
-  customPermissions     Json? 
-  acknowledgedRequests ServiceRequest[] @relation("AcknowledgedBy")
-
+  
   reassignmentsBy    ReassignmentHistory[] @relation("reassignedBy")
   reassignedFrom     ReassignmentHistory[] @relation("previousTechnician")
   reassignedTo       ReassignmentHistory[] @relation("newTechnician")
-
+  assembliesCreated  AssemblyHistory[]     @relation("AssemblyCreator")
   
-  workLogs          WorkLog[]
-  notificationsSent     Notification[] @relation("NotificationSender")
-  notificationsReceived Notification[] @relation("NotificationReceiver")
+  workLogs               WorkLog[]
+  approvalHistory        ApprovalHistory[]
+  notificationsSent      Notification[] @relation("NotificationSender")
+  notificationsReceived  Notification[] @relation("NotificationReceiver")
+  technicianStock        TechnicianStock[] // ✅ NEW
 }
 
-
-// schema.prisma
-
 model Customer {
-  id            String          @id @default(uuid())
+  id            String   @id @default(uuid())
   name          String
-  address       String          // Keep as primary/default address
-  primaryPhone  String          @unique
-  phoneNumbers  String[]
+  address       String
+  primaryPhone  String   @unique
+  phoneNumbers  Json?
   email         String?
   regionId      String
   latitude      Float?
   longitude     Float?
   googleMapsUrl String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  
-  region        Region          @relation(fields: [regionId], references: [id])
-  installations Installation[]  // ✅ NEW: Multiple installations
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  region        Region           @relation(fields: [regionId], references: [id])
+  installations Installation[]
   requests      ServiceRequest[]
-  
+
   @@index([regionId])
   @@index([primaryPhone])
 }
 
+model Installation {
+  id               String   @id @default(uuid())
+  customerId       String
+  regionId         String
+  name             String
+  address          String
+  landmark         String?
+  contactPerson    String?
+  contactPhone     String?
+  latitude         Float?
+  longitude        Float?
+  googleMapsUrl    String?
+  installationType String?
+  notes            String?
+  isActive         Boolean  @default(true)
+  isPrimary        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-model ServiceRequest {
-  id            String          @id @default(uuid())
-  type          RequestType
-  description   String
-  status        RequestStatus   @default(ASSIGNED)
-  priority      ServicePriority @default(NORMAL)
-  requestedById String
-  approvedById  String?
-  assignedToId  String?
-  regionId      String
-  customerId    String
-  installationId String?        // ✅ NEW: Optional installation reference
-  createdAt     DateTime        @default(now())
-  salesApproved Boolean         @default(false)
-  
-  acknowledgedById           String?
-  acknowledgedAt             DateTime?
-  acknowledgmentComments     String?
-  
-  usedProducts               ServiceUsedProduct[]
-  reassignmentHistory        ReassignmentHistory[]
-  
-  requestedBy   User         @relation("Requester", fields: [requestedById], references: [id])
-  approvedBy    User?        @relation("Approver", fields: [approvedById], references: [id])
-  assignedTo    User?        @relation("TechnicianAssigned", fields: [assignedToId], references: [id])
-  acknowledgedBy User?       @relation("AcknowledgedBy", fields: [acknowledgedById], references: [id])
-  
-  region        Region       @relation(fields: [regionId], references: [id])
-  customer      Customer     @relation(fields: [customerId], references: [id])
-  installation  Installation? @relation(fields: [installationId], references: [id]) // ✅ NEW
-  
-  workLogs      WorkLog[]
-  workMedia     WorkMedia[]
-  approvalHistory ApprovalHistory[]
-  
-  @@index([installationId])  // ✅ NEW: Add index for performance
+  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  region          Region           @relation(fields: [regionId], references: [id])
+  serviceRequests ServiceRequest[]
+
+  @@index([customerId])
+  @@index([regionId])
+  @@index([isActive])
 }
 
+model ServiceRequest {
+  id                     String          @id @default(uuid())
+  type                   RequestType
+  description            String
+  status                 RequestStatus   @default(ASSIGNED)
+  priority               ServicePriority @default(NORMAL)
+  requestedById          String
+  approvedById           String?
+  assignedToId           String?
+  regionId               String
+  customerId             String
+  installationId         String?
+  acknowledgedById       String?
+  acknowledgedAt         DateTime?
+  acknowledgmentComments String?
+  salesApproved          Boolean         @default(false)
+  createdAt              DateTime        @default(now())
+  categoryId             String?
+
+  requestedBy    User          @relation("Requester", fields: [requestedById], references: [id])
+  approvedBy     User?         @relation("Approver", fields: [approvedById], references: [id])
+  assignedTo     User?         @relation("TechnicianAssigned", fields: [assignedToId], references: [id])
+  acknowledgedBy User?         @relation("AcknowledgedBy", fields: [acknowledgedById], references: [id])
+  region         Region        @relation(fields: [regionId], references: [id])
+  customer       Customer      @relation(fields: [customerId], references: [id])
+  installation   Installation? @relation(fields: [installationId], references: [id])
+  category    ProductCategory? @relation(fields: [categoryId], references: [id])
+
+  usedProducts        ServiceUsedProduct[]
+  reassignmentHistory ReassignmentHistory[]
+  workLogs            WorkLog[]
+  workMedia           WorkMedia[]
+  approvalHistory     ApprovalHistory[]
+
+  @@index([installationId])
+  @@index([categoryId])
+}
 
 model ReassignmentHistory {
-  id              String    @id @default(uuid())
-  requestId       String
-  request         ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  
-  reassignedBy    String    // Admin/Manager who did reassignment
-  reassigner      User      @relation("reassignedBy", fields: [reassignedBy], references: [id])
-  
-  previousTechId  String?   // Old technician
-  previousTech    User?     @relation("previousTechnician", fields: [previousTechId], references: [id])
-  
-  newTechId       String    // New technician
-  newTech         User      @relation("newTechnician", fields: [newTechId], references: [id])
-  
-  reason          String    // Why reassignment happened
-  createdAt       DateTime  @default(now())
-  
+  id             String   @id @default(uuid())
+  requestId      String
+  reassignedBy   String
+  previousTechId String?
+  newTechId      String
+  reason         String
+  createdAt      DateTime @default(now())
+
+  request      ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  reassigner   User           @relation("reassignedBy", fields: [reassignedBy], references: [id])
+  previousTech User?          @relation("previousTechnician", fields: [previousTechId], references: [id])
+  newTech      User           @relation("newTechnician", fields: [newTechId], references: [id])
+
   @@index([requestId])
   @@index([previousTechId])
   @@index([newTechId])
 }
 
-
-
 model WorkLog {
   id           String    @id @default(uuid())
-  requestId    String    // changed from Int to String
-  technicianId String    // changed from Int to String
+  requestId    String
+  technicianId String
   startTime    DateTime?
   endTime      DateTime?
   duration     Int?
   notes        String?
 
-  request      ServiceRequest @relation(fields: [requestId], references: [id])
-  technician   User           @relation(fields: [technicianId], references: [id])
+  request    ServiceRequest @relation(fields: [requestId], references: [id])
+  technician User           @relation(fields: [technicianId], references: [id])
 }
 
 model WorkMedia {
-  id         String       @id @default(uuid())
-  requestId  String       // changed from Int to String
+  id         String   @id @default(uuid())
+  requestId  String
   fileUrl    String
-  uploadedAt DateTime     @default(now())
-  request    ServiceRequest @relation(fields: [requestId], references: [id])
+  uploadedAt DateTime @default(now())
+  
+  request ServiceRequest @relation(fields: [requestId], references: [id])
 }
 
 model Notification {
-  id         String     @id @default(uuid())
-  fromUserId String     // changed from Int to String
-  toUserId   String     // changed from Int to String
+  id         String   @id @default(uuid())
+  fromUserId String
+  toUserId   String
   message    String
-  status     String     @default("sent")
-  createdAt  DateTime   @default(now())
+  status     String   @default("sent")
+  createdAt  DateTime @default(now())
 
-  sender     User       @relation("NotificationSender", fields: [fromUserId], references: [id])
-  receiver   User       @relation("NotificationReceiver", fields: [toUserId], references: [id])
+  sender   User @relation("NotificationSender", fields: [fromUserId], references: [id])
+  receiver User @relation("NotificationReceiver", fields: [toUserId], references: [id])
 }
 
 model ApprovalHistory {
-  id              String        @id @default(uuid())
-  requestId       String
-  approverId      String
-  approverRole    String
-  status          String        // APPROVED, REJECTED
-  comments        String?
-  approvedAt      DateTime      @default(now())
-  
-  request         ServiceRequest @relation(fields: [requestId], references: [id])
-  approver        User          @relation(fields: [approverId], references: [id])
+  id           String   @id @default(uuid())
+  requestId    String
+  approverId   String
+  approverRole String
+  status       String
+  comments     String?
+  approvedAt   DateTime @default(now())
+
+  request  ServiceRequest @relation(fields: [requestId], references: [id])
+  approver User           @relation(fields: [approverId], references: [id])
 }
 
+// ============================================
+// PRODUCT CATEGORIES (RO, UV, etc.)
+// ============================================
+model ProductCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-// Spare Parts/Products Inventory
-model Product {
-  id              String    @id @default(uuid())
-  name            String    @unique
-  description     String?
-  sku             String?   @unique // Stock Keeping Unit
-  price           Decimal   @default(0)
-  stock           Int       @default(0)
-  
-  // Warranty fields
-  hasWarranty     Boolean   @default(false)
-  warrantyMonths  Int?      // For warranties less than 12 months (e.g., 6 months)
-  warrantyYears   Int?      // For warranties >= 12 months (years part, e.g., 2 years = 24 months)
-  
-  // Metadata
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  company         String? 
+  products Product[]
+  serviceRequests ServiceRequest[]
 
-  usedInServices  ServiceUsedProduct[]
-  
-  // Relations (if needed later for orders, service requests, etc.)
-  stockHistory    StockHistory[]
-  
+  @@index([name])
+  @@index([isActive])
+}
+
+// ============================================
+// SPARE PART GROUPS (Filters, Electronics, etc.)
+// ============================================
+model SparePartGroup {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  spareParts SparePart[]
+
+  @@index([name])
+  @@index([isActive])
+}
+
+// ============================================
+// SPARE PARTS (Components)
+// ============================================
+model SparePart {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+  sku         String? @unique
+  groupId     String?
+  price       Float  @default(0)
+  stock       Int     @default(0)
+
+  hasWarranty    Boolean @default(false)
+  warrantyMonths Int?
+  warrantyYears  Int?
+
+  company   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  group             SparePartGroup?         @relation(fields: [groupId], references: [id])
+  stockHistory      SparePartStockHistory[]
+  bomItems          BOMTemplateItem[]
+  assemblyUsage     AssemblyUsedPart[]
+  usedInServices    ServiceUsedProduct[]
+  technicianStock   TechnicianStock[] // ✅ NEW
+
   @@index([name])
   @@index([sku])
+  @@index([groupId])
 }
 
-model SystemSetting {
-  id              String    @id @default(uuid())
-  key             String    @unique  // e.g., "low_stock_threshold"
-  value           String    // Stored as JSON string
-  description     String?
-  updatedAt       DateTime  @updatedAt
-  updatedBy       String?
+// ============================================
+// PRODUCTS (Finished Goods)
+// ============================================
+model Product {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+  sku         String? @unique
+  categoryId  String?
+  price       Float  @default(0)
+  stock       Int     @default(0)
+
+  hasWarranty    Boolean @default(false)
+  warrantyMonths Int?
+  warrantyYears  Int?
+
+  company   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category        ProductCategory?      @relation(fields: [categoryId], references: [id])
+  stockHistory    ProductStockHistory[]
+  bomTemplate     BOMTemplate?
+  assemblies      AssemblyHistory[]
+  usedInServices  ServiceUsedProduct[]
+  technicianStock TechnicianStock[] // ✅ NEW
+
+  @@index([name])
+  @@index([sku])
+  @@index([categoryId])
+}
+
+// ============================================
+// BOM TEMPLATES
+// ============================================
+model BOMTemplate {
+  id          String   @id @default(uuid())
+  productId   String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product    Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  items      BOMTemplateItem[]
+  assemblies AssemblyHistory[]
+
+  @@index([productId])
+  @@index([isActive])
+}
+
+model BOMTemplateItem {
+  id            String   @id @default(uuid())
+  bomTemplateId String
+  sparePartId   String
+  quantity      Int      @default(1)
+  isOptional    Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  bomTemplate BOMTemplate @relation(fields: [bomTemplateId], references: [id], onDelete: Cascade)
+  sparePart   SparePart   @relation(fields: [sparePartId], references: [id])
+
+  @@unique([bomTemplateId, sparePartId])
+  @@index([bomTemplateId])
+  @@index([sparePartId])
+}
+
+// ============================================
+// ASSEMBLY HISTORY
+// ============================================
+model AssemblyHistory {
+  id            String   @id @default(uuid())
+  productId     String
+  bomTemplateId String
+  assembledBy   String
+  assembledAt   DateTime @default(now())
+  notes         String?
+  totalCost     Float   @default(0)
+
+  product     Product            @relation(fields: [productId], references: [id])
+  bomTemplate BOMTemplate        @relation(fields: [bomTemplateId], references: [id])
+  assembler   User               @relation("AssemblyCreator", fields: [assembledBy], references: [id])
+  usedParts   AssemblyUsedPart[]
+
+  @@index([productId])
+  @@index([bomTemplateId])
+  @@index([assembledBy])
+  @@index([assembledAt])
+}
+
+model AssemblyUsedPart {
+  id                String  @id @default(uuid())
+  assemblyHistoryId String
+  sparePartId       String
+  quantityUsed      Int
+  costAtTime        Float 
+
+  assemblyHistory AssemblyHistory @relation(fields: [assemblyHistoryId], references: [id], onDelete: Cascade)
+  sparePart       SparePart       @relation(fields: [sparePartId], references: [id])
+
+  @@index([assemblyHistoryId])
+  @@index([sparePartId])
+}
+
+// ============================================
+// STOCK HISTORY
+// ============================================
+model SparePartStockHistory {
+  id             String   @id @default(uuid())
+  sparePartId    String
+  quantityChange Int
+  reason         String
+  createdAt      DateTime @default(now())
+
+  sparePart SparePart @relation(fields: [sparePartId], references: [id], onDelete: Cascade)
+
+  @@index([sparePartId])
+  @@index([createdAt])
+}
+
+model ProductStockHistory {
+  id             String   @id @default(uuid())
+  productId      String
+  quantityChange Int
+  reason         String
+  createdAt      DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([createdAt])
+}
+
+// ============================================
+// TECHNICIAN STOCK (NEW) ✅
+// ============================================
+model TechnicianStock {
+  id           String   @id @default(uuid())
+  technicianId String
+  sparePartId  String?
+  productId    String?
+  quantity     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  technician User       @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  sparePart  SparePart? @relation(fields: [sparePartId], references: [id])
+  product    Product?   @relation(fields: [productId], references: [id])
+
+  @@unique([technicianId, sparePartId])
+  @@unique([technicianId, productId])
+  @@index([technicianId])
+  @@index([sparePartId])
+  @@index([productId])
+}
+
+// ============================================
+// SERVICE USED PRODUCTS (FIXED) ✅
+// ============================================
+model ServiceUsedProduct {
+  id        String   @id @default(uuid())
+  requestId String
   
+  // ✅ EITHER product OR spare part (validated in service layer)
+  productId   String?
+  sparePartId String?
+  
+  quantityUsed Int
+  notes        String?
+  
+  confirmedBy String
+  confirmedAt DateTime @default(now())
+
+  request       ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  product       Product?       @relation(fields: [productId], references: [id])
+  sparePart     SparePart?     @relation(fields: [sparePartId], references: [id])
+  confirmedUser User           @relation("confirmedBy", fields: [confirmedBy], references: [id])
+
+  @@index([requestId])
+  @@index([productId])
+  @@index([sparePartId])
+}
+
+// ============================================
+// SYSTEM SETTINGS
+// ============================================
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  updatedBy   String?
+
   @@index([key])
 }
 
-// Track stock changes (optional but useful)
-model StockHistory {
-  id            String    @id @default(uuid())
-  productId     String
-  quantityChange Int     // Positive for increase, negative for decrease
-  reason        String    // "Added", "Used in Service", "Adjustment", etc.
-  createdAt     DateTime  @default(now())
-  
-  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  
-  @@index([productId])
-}
-
-model ServiceUsedProduct {
-  id            String    @id @default(uuid())
-  requestId     String
-  request       ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  
-  productId     String
-  product       Product   @relation(fields: [productId], references: [id])
-  
-  quantityUsed  Int       // Quantity used in this service
-  notes         String?   // Optional service notes/description
-  
-  confirmedAt   DateTime  @default(now())
-  confirmedBy   String    // Technician who confirmed
-  confirmedUser User      @relation("confirmedBy", fields: [confirmedBy], references: [id])
-  
-  @@index([requestId])
-  @@index([productId])
-}
 
 
 
