@@ -16,6 +16,11 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { ProductsModule } from './products/products.module';
 import { InstallationsModule } from './installations/installations.module';
+import { ProductCategoriesModule } from './product-categories/product-categories.module';
+import { SparePartGroupsModule } from './spare-part-groups/spare-part-groups.module';
+import { SparePartsModule } from './spare-parts/spare-parts.module';
+import { BOMTemplatesModule } from './bom-templates/bom-templates.module';
+import { AssembliesModule } from './assemblies/assemblies.module';
 
 @Module({
   imports: [
@@ -37,6 +42,11 @@ import { InstallationsModule } from './installations/installations.module';
     InstallationsModule,
     TechniciansModule,
     ProductsModule,
+    ProductCategoriesModule,
+    SparePartGroupsModule,
+    SparePartsModule,
+    BOMTemplatesModule,
+    AssembliesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -65,6 +65,7 @@ export class ServiceRequestsService {
         region: true,
         approvalHistory: { include: { approver: true } },
       },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -83,6 +84,7 @@ export class ServiceRequestsService {
           include: { approver: true },
           orderBy: { approvedAt: 'asc' },
         },
+        category: true,
       },
     });
     if (!request) throw new NotFoundException('Service request not found');
@@ -610,11 +612,114 @@ export class ServiceRequestsService {
 
   // ✅ ADD THESE METHODS:
 
-  async addUsedProducts(
+  // async addUsedProducts(
+  //   requestId: string,
+  //   userId: string,
+  //   usedProducts: Array<{
+  //     productId: string;
+  //     quantityUsed: number;
+  //     notes?: string;
+  //   }>,
+  // ) {
+  //   const request = await this.findOne(requestId);
+  //   const technician = await this.prisma.user.findUnique({
+  //     where: { id: userId },
+  //     include: { role: true },
+  //   });
+
+  //   if (!technician) {
+  //     throw new NotFoundException('User not found');
+  //   }
+
+  //   // ✅ ONLY TECHNICIAN CAN ADD USED PRODUCTS
+  //   if (technician.role.name !== 'Technician') {
+  //     throw new ForbiddenException('Only technicians can add used products');
+  //   }
+
+  //   // ✅ CHECK STATUS - WORK_COMPLETED ONLY
+  //   if (request.status !== 'WORK_COMPLETED') {
+  //     throw new ForbiddenException(
+  //       'Products can only be added when work is completed. Current status: ' +
+  //         request.status,
+  //     );
+  //   }
+
+  //   // ✅ CHECK IF PRODUCTS ALREADY ADDED
+  //   const existingProducts = await this.prisma.serviceUsedProduct.findMany({
+  //     where: { requestId },
+  //   });
+
+  //   if (existingProducts.length > 0) {
+  //     throw new BadRequestException(
+  //       'Products already added for this service request. Editing is not allowed.',
+  //     );
+  //   }
+
+  //   // ✅ VALIDATE & PROCESS EACH PRODUCT
+  //   const addedProducts: any[] = [];
+
+  //   for (const item of usedProducts) {
+  //     const product = await this.prisma.product.findUnique({
+  //       where: { id: item.productId },
+  //     });
+
+  //     if (!product) {
+  //       throw new NotFoundException(`Product ${item.productId} not found`);
+  //     }
+
+  //     if (product.stock < item.quantityUsed) {
+  //       throw new BadRequestException(
+  //         `Insufficient stock for product "${product.name}". Available: ${product.stock}, Requested: ${item.quantityUsed}`,
+  //       );
+  //     }
+
+  //     // ✅ CREATE USED PRODUCT RECORD
+  //     const usedProduct = await this.prisma.serviceUsedProduct.create({
+  //       data: {
+  //         requestId,
+  //         productId: item.productId,
+  //         quantityUsed: item.quantityUsed,
+  //         notes: item.notes,
+  //         confirmedBy: userId,
+  //       },
+  //       include: {
+  //         product: true,
+  //         confirmedUser: true,
+  //       },
+  //     });
+
+  //     // ✅ DECREASE STOCK QUANTITY
+  //     await this.prisma.product.update({
+  //       where: { id: item.productId },
+  //       data: {
+  //         stock: {
+  //           decrement: item.quantityUsed,
+  //         },
+  //       },
+  //     });
+
+  //     // ✅ LOG STOCK CHANGE
+  //     // ✅ LOG STOCK CHANGE
+  //     await this.prisma.productStockHistory.create({
+  //       data: {
+  //         productId: item.productId,
+  //         quantityChange: -item.quantityUsed,
+  //         reason: `Used in Service: Request #${requestId}`,
+  //       },
+  //     });
+
+  //     addedProducts.push(usedProduct);
+  //   }
+
+  //   return addedProducts;
+  // }
+
+  async addUsedItems(
     requestId: string,
     userId: string,
-    usedProducts: Array<{
-      productId: string;
+    usedItems: Array<{
+      type: string;
+      id: string;
       quantityUsed: number;
       notes?: string;
     }>,
@@ -625,90 +730,123 @@ export class ServiceRequestsService {
       include: { role: true },
     });
 
-    if (!technician) {
-      throw new NotFoundException('User not found');
-    }
-
-    // ✅ ONLY TECHNICIAN CAN ADD USED PRODUCTS
-    if (technician.role.name !== 'Technician') {
-      throw new ForbiddenException('Only technicians can add used products');
-    }
-
-    // ✅ CHECK STATUS - WORK_COMPLETED ONLY
-    if (request.status !== 'WORK_COMPLETED') {
+    if (!technician) throw new NotFoundException('User not found');
+    if (technician.role.name !== 'Technician')
+      throw new ForbiddenException('Only technicians can add used items');
+    if (request.status !== 'WORK_COMPLETED')
       throw new ForbiddenException(
-        'Products can only be added when work is completed. Current status: ' +
-          request.status,
+        `Can only add after work completed. Status: ${request.status}`,
       );
-    }
 
-    // ✅ CHECK IF PRODUCTS ALREADY ADDED
     const existingProducts = await this.prisma.serviceUsedProduct.findMany({
       where: { requestId },
     });
-
-    if (existingProducts.length > 0) {
+    if (existingProducts.length > 0)
       throw new BadRequestException(
-        'Products already added for this service request. Editing is not allowed.',
+        'Used products already added; editing disallowed.',
       );
+
+    const addedItems: any[] = [];
+
+    for (const item of usedItems) {
+      if (item.type === 'product') {
+        const product = await this.prisma.product.findUnique({
+          where: { id: item.id },
+        });
+        if (!product)
+          throw new NotFoundException(`Product ${item.id} not found`);
+        if (product.stock < item.quantityUsed)
+          throw new BadRequestException(
+            `Insufficient stock for product "${product.name}".`,
+          );
+
+        const usedProduct = await this.prisma.serviceUsedProduct.create({
+          data: {
+            requestId,
+            productId: item.id,
+            quantityUsed: item.quantityUsed,
+            notes: item.notes,
+            confirmedBy: userId,
+          },
+          include: { product: true, confirmedUser: true },
+        });
+
+        await this.prisma.product.update({
+          where: { id: item.id },
+          data: { stock: { decrement: item.quantityUsed } },
+        });
+
+        await this.prisma.productStockHistory.create({
+          data: {
+            productId: item.id,
+            quantityChange: -item.quantityUsed,
+            reason: `Used in Service Request #${requestId}`,
+          },
+        });
+
+        addedItems.push(usedProduct);
+      } else if (item.type === 'sparePart') {
+        const sparePart = await this.prisma.sparePart.findUnique({
+          where: { id: item.id },
+        });
+        if (!sparePart)
+          throw new NotFoundException(`Spare part ${item.id} not found`);
+        if (sparePart.stock < item.quantityUsed)
+          throw new BadRequestException(
+            `Insufficient stock for spare part "${sparePart.name}".`,
+          );
+
+        const usedSparePart = await this.prisma.serviceUsedProduct.create({
+          data: {
+            requestId,
+            sparePartId: item.id,
+            quantityUsed: item.quantityUsed,
+            notes: item.notes,
+            confirmedBy: userId,
+          },
+          include: { sparePart: true, confirmedUser: true },
+        });
+
+        await this.prisma.sparePart.update({
+          where: { id: item.id },
+          data: { stock: { decrement: item.quantityUsed } },
+        });
+
+        await this.prisma.sparePartStockHistory.create({
+          data: {
+            sparePartId: item.id,
+            quantityChange: -item.quantityUsed,
+            reason: `Used in Service Request #${requestId}`,
+          },
+        });
+
+        addedItems.push(usedSparePart);
+      }
     }
 
-    // ✅ VALIDATE & PROCESS EACH PRODUCT
-    const addedProducts: any[] = [];
+    return addedItems;
+  }
 
-    for (const item of usedProducts) {
-      const product = await this.prisma.product.findUnique({
-        where: { id: item.productId },
-      });
-
-      if (!product) {
-        throw new NotFoundException(`Product ${item.productId} not found`);
-      }
-
-      if (product.stock < item.quantityUsed) {
-        throw new BadRequestException(
-          `Insufficient stock for product "${product.name}". Available: ${product.stock}, Requested: ${item.quantityUsed}`,
-        );
-      }
-
-      // ✅ CREATE USED PRODUCT RECORD
-      const usedProduct = await this.prisma.serviceUsedProduct.create({
-        data: {
-          requestId,
-          productId: item.productId,
-          quantityUsed: item.quantityUsed,
-          notes: item.notes,
-          confirmedBy: userId,
-        },
-        include: {
-          product: true,
-          confirmedUser: true,
-        },
-      });
-
-      // ✅ DECREASE STOCK QUANTITY
-      await this.prisma.product.update({
-        where: { id: item.productId },
-        data: {
-          stock: {
-            decrement: item.quantityUsed,
+  async getUsedSpareParts(requestId: string) {
+    return this.prisma.serviceUsedProduct.findMany({
+      where: { requestId, sparePartId: { not: null } },
+      include: {
+        sparePart: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
           },
         },
-      });
-
-      // ✅ LOG STOCK CHANGE
-      await this.prisma.stockHistory.create({
-        data: {
-          productId: item.productId,
-          quantityChange: -item.quantityUsed,
-          reason: `Used in Service: Request #${requestId}`,
+        confirmedUser: {
+          select: {
+            id: true,
+            name: true,
+          },
         },
-      });
-
-      addedProducts.push(usedProduct);
-    }
-
-    return addedProducts;
+      },
+      orderBy: { confirmedAt: 'desc' },
+    });
   }
 
   async getUsedProducts(requestId: string) {
@@ -1248,7 +1386,7 @@ export class ServiceRequestsService {
     const { startDate, endDate } = this.getDateRange(query);
 
     // Most used products
-    const productUsage = await this.prisma.serviceUsedProduct.groupBy({
+    const productUsage: any = await this.prisma.serviceUsedProduct.groupBy({
       by: ['productId'],
       where: {
         confirmedAt: { gte: startDate, lte: endDate },
@@ -1382,6 +1520,12 @@ export class ServiceRequestsService {
       );
     }
 
+    if (dto.categoryId === '') {
+      dto.categoryId = null;
+    }
+    if (dto.installationId === '') {
+      dto.installationId = null;
+    }
     // Create service request with ASSIGNED status directly
     const serviceRequest = await this.prisma.serviceRequest.create({
       data: {
@@ -1390,6 +1534,7 @@ export class ServiceRequestsService {
         customerId: dto.customerId,
         regionId: dto.regionId,
         requestedById: userId,
+        categoryId: dto.categoryId,
         assignedToId: dto.assignedToId, // ✅ Assign directly
         priority: dto.priority || 'NORMAL', // ✅ Set priority
         status: 'ASSIGNED', // ✅ Skip DRAFT, PENDING_APPROVAL, APPROVED
