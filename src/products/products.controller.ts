@@ -35,12 +35,15 @@ export class ProductsController {
     return this.productsService.findAll(categoryId);
   }
 
+  // ✅ UPDATED: Accept optional threshold query param
   @Get('low-stock')
   @RequirePermissions('products.view')
-  getLowStockProducts() {
-    return this.productsService.getLowStockProducts();
+  getLowStockProducts(@Query('threshold') threshold?: string) {
+    const thresholdValue = threshold ? parseInt(threshold, 10) : undefined;
+    return this.productsService.getLowStockProducts(thresholdValue);
   }
 
+  // ✅ Already correct - get current threshold
   @Get('low-stock-threshold')
   @RequirePermissions('products.view')
   async getLowStockThreshold() {
@@ -49,6 +52,7 @@ export class ProductsController {
     };
   }
 
+  // ✅ Already correct - update threshold
   @Put('low-stock-threshold')
   @RequirePermissions('products.update')
   async setLowStockThreshold(@Body() body: { threshold: number }, @Req() req) {
@@ -59,11 +63,13 @@ export class ProductsController {
     return { success: true, threshold: body.threshold };
   }
 
+  // ✅ UPDATED: Accept optional threshold query param
   @Get('low-stock-count')
   @RequirePermissions('products.view')
-  async getLowStockCount() {
+  async getLowStockCount(@Query('threshold') threshold?: string) {
+    const thresholdValue = threshold ? parseInt(threshold, 10) : undefined;
     return {
-      count: await this.productsService.getLowStockCount(),
+      count: await this.productsService.getLowStockCount(thresholdValue),
     };
   }
 
@@ -72,7 +78,7 @@ export class ProductsController {
   async getFiltered(@Query() filters: any) {
     console.log('filtered ', filters);
     return this.productsService.getFilteredProducts({
-      categoryId: filters.categoryId, // ✅ NEW: Filter by category
+      categoryId: filters.categoryId,
       company: filters.company,
       minPrice: filters.minPrice ? Number(filters.minPrice) : undefined,
       maxPrice: filters.maxPrice ? Number(filters.maxPrice) : undefined,
@@ -84,7 +90,6 @@ export class ProductsController {
     });
   }
 
-  // ✅ NEW: Get products by category
   @Get('by-category/:categoryId')
   @RequirePermissions('products.view')
   getByCategory(@Param('categoryId') categoryId: string) {
