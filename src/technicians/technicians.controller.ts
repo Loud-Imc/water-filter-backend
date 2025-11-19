@@ -3,6 +3,7 @@ import { TechniciansService } from './technicians.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { RequirePermissions } from 'src/auth/permissions.decorator';
 
 // ✅ Technician-only endpoints - keep role-based
 // These are personal endpoints (user can only see their own data)
@@ -37,5 +38,19 @@ export class TechniciansController {
   @Roles('Technician')
   getMyStats(@Req() req) {
     return this.techniciansService.getMyStats(req.user.userId);
+  }
+
+  // Get current technician's stock
+  @Get('my-stock')
+  @Roles('Technician')
+  getMyStock(@Req() req) {
+    return this.techniciansService.getTechnicianStock(req.user.userId);
+  }
+
+  // Get specific technician's stock (admin only)
+  @Get(':technicianId')
+  @RequirePermissions('technician-stock.view')
+  getTechnicianStock(@Param('technicianId') technicianId: string) {
+    return this.techniciansService.getTechnicianStock(technicianId);
   }
 }

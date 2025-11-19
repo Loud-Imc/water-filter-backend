@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { TechnicianStock } from '@prisma/client';
 
 @Injectable()
 export class TechniciansService {
@@ -52,11 +53,14 @@ export class TechniciansService {
         approvedBy: { select: { name: true, email: true } },
         workLogs: true,
         workMedia: true,
-        approvalHistory: { include: { approver: { select: { name: true, email: true } } } },
+        approvalHistory: {
+          include: { approver: { select: { name: true, email: true } } },
+        },
       },
     });
 
-    if (!task) throw new NotFoundException('Task not found or not assigned to you');
+    if (!task)
+      throw new NotFoundException('Task not found or not assigned to you');
     return task;
   }
 
@@ -84,5 +88,15 @@ export class TechniciansService {
       completed,
       totalWorkTime: totalWorkTime._sum.duration || 0,
     };
+  }
+
+  async getTechnicianStock(technicianId: string): Promise<TechnicianStock[]> {
+    return this.prisma.technicianStock.findMany({
+      where: { technicianId },
+      include: {
+        product: true,
+        sparePart: true,
+      },
+    });
   }
 }

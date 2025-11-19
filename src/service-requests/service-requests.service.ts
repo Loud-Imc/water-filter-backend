@@ -714,6 +714,119 @@ export class ServiceRequestsService {
   //   return addedProducts;
   // }
 
+  // async addUsedItems(
+  //   requestId: string,
+  //   userId: string,
+  //   usedItems: Array<{
+  //     type: string;
+  //     id: string;
+  //     quantityUsed: number;
+  //     notes?: string;
+  //   }>,
+  // ) {
+  //   const request = await this.findOne(requestId);
+  //   const technician = await this.prisma.user.findUnique({
+  //     where: { id: userId },
+  //     include: { role: true },
+  //   });
+
+  //   if (!technician) throw new NotFoundException('User not found');
+  //   if (technician.role.name !== 'Technician')
+  //     throw new ForbiddenException('Only technicians can add used items');
+  //   if (request.status !== 'WORK_COMPLETED')
+  //     throw new ForbiddenException(
+  //       `Can only add after work completed. Status: ${request.status}`,
+  //     );
+
+  //   const existingProducts = await this.prisma.serviceUsedProduct.findMany({
+  //     where: { requestId },
+  //   });
+  //   if (existingProducts.length > 0)
+  //     throw new BadRequestException(
+  //       'Used products already added; editing disallowed.',
+  //     );
+
+  //   const addedItems: any[] = [];
+
+  //   for (const item of usedItems) {
+  //     if (item.type === 'product') {
+  //       const product = await this.prisma.product.findUnique({
+  //         where: { id: item.id },
+  //       });
+  //       if (!product)
+  //         throw new NotFoundException(`Product ${item.id} not found`);
+  //       if (product.stock < item.quantityUsed)
+  //         throw new BadRequestException(
+  //           `Insufficient stock for product "${product.name}".`,
+  //         );
+
+  //       const usedProduct = await this.prisma.serviceUsedProduct.create({
+  //         data: {
+  //           requestId,
+  //           productId: item.id,
+  //           quantityUsed: item.quantityUsed,
+  //           notes: item.notes,
+  //           confirmedBy: userId,
+  //         },
+  //         include: { product: true, confirmedUser: true },
+  //       });
+
+  //       await this.prisma.product.update({
+  //         where: { id: item.id },
+  //         data: { stock: { decrement: item.quantityUsed } },
+  //       });
+
+  //       await this.prisma.productStockHistory.create({
+  //         data: {
+  //           productId: item.id,
+  //           quantityChange: -item.quantityUsed,
+  //           reason: `Used in Service Request #${requestId}`,
+  //         },
+  //       });
+
+  //       addedItems.push(usedProduct);
+  //     } else if (item.type === 'sparePart') {
+  //       const sparePart = await this.prisma.sparePart.findUnique({
+  //         where: { id: item.id },
+  //       });
+  //       if (!sparePart)
+  //         throw new NotFoundException(`Spare part ${item.id} not found`);
+  //       if (sparePart.stock < item.quantityUsed)
+  //         throw new BadRequestException(
+  //           `Insufficient stock for spare part "${sparePart.name}".`,
+  //         );
+
+  //       const usedSparePart = await this.prisma.serviceUsedProduct.create({
+  //         data: {
+  //           requestId,
+  //           sparePartId: item.id,
+  //           quantityUsed: item.quantityUsed,
+  //           notes: item.notes,
+  //           confirmedBy: userId,
+  //         },
+  //         include: { sparePart: true, confirmedUser: true },
+  //       });
+
+  //       await this.prisma.sparePart.update({
+  //         where: { id: item.id },
+  //         data: { stock: { decrement: item.quantityUsed } },
+  //       });
+
+  //       await this.prisma.sparePartStockHistory.create({
+  //         data: {
+  //           sparePartId: item.id,
+  //           quantityChange: -item.quantityUsed,
+  //           reason: `Used in Service Request #${requestId}`,
+  //         },
+  //       });
+
+  //       addedItems.push(usedSparePart);
+  //     }
+  //   }
+
+  //   return addedItems;
+  // }
+
   async addUsedItems(
     requestId: string,
     userId: string,
@@ -722,9 +835,11 @@ export class ServiceRequestsService {
       id: string;
       quantityUsed: number;
       notes?: string;
+      source: 'warehouse' | 'technician'; // NEW parameter
     }>,
   ) {
     const request = await this.findOne(requestId);
+
     const technician = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { role: true },
@@ -755,10 +870,41 @@ export class ServiceRequestsService {
         });
         if (!product)
           throw new NotFoundException(`Product ${item.id} not found`);
-        if (product.stock < item.quantityUsed)
-          throw new BadRequestException(
-            `Insufficient stock for product "${product.name}".`,
-          );
+
+        if (item.source === 'warehouse') {
+          if (product.stock < item.quantityUsed)
+            throw new BadRequestException(
+              `Insufficient warehouse stock for product "${product.name}".`,
+            );
+
+          // Reduce warehouse stock
+          await this.prisma.product.update({
+            where: { id: item.id },
+            data: { stock: { decrement: item.quantityUsed } },
+          });
+        } else if (item.source === 'technician') {
+          // Reduce technician stock
+          const techStockRecord = await this.prisma.technicianStock.findUnique({
+            where: {
+              technicianId_productId: {
+                technicianId: userId,
+                productId: item.id,
+              },
+            },
+          });
+          if (
+            !techStockRecord ||
+            techStockRecord.quantity < item.quantityUsed
+          ) {
+            throw new BadRequestException(
+              `Insufficient technician stock for product "${product.name}".`,
+            );
+          }
+          await this.prisma.technicianStock.update({
+            where: { id: techStockRecord.id },
+            data: { quantity: { decrement: item.quantityUsed } },
+          });
+        }
 
         const usedProduct = await this.prisma.serviceUsedProduct.create({
           data: {
@@ -771,18 +917,16 @@ export class ServiceRequestsService {
           include: { product: true, confirmedUser: true },
         });
 
-        await this.prisma.product.update({
-          where: { id: item.id },
-          data: { stock: { decrement: item.quantityUsed } },
-        });
-
-        await this.prisma.productStockHistory.create({
-          data: {
-            productId: item.id,
-            quantityChange: -item.quantityUsed,
-            reason: `Used in Service Request #${requestId}`,
-          },
-        });
+        // Log stock history for warehouse stock only (optional: log technician stock separately)
+        if (item.source === 'warehouse') {
+          await this.prisma.productStockHistory.create({
+            data: {
+              productId: item.id,
+              quantityChange: -item.quantityUsed,
+              reason: `Used in Service Request #${requestId}`,
+            },
+          });
+        }
 
         addedItems.push(usedProduct);
       } else if (item.type === 'sparePart') {
@@ -791,10 +935,41 @@ export class ServiceRequestsService {
         });
         if (!sparePart)
           throw new NotFoundException(`Spare part ${item.id} not found`);
-        if (sparePart.stock < item.quantityUsed)
-          throw new BadRequestException(
-            `Insufficient stock for spare part "${sparePart.name}".`,
-          );
+
+        if (item.source === 'warehouse') {
+          if (sparePart.stock < item.quantityUsed)
+            throw new BadRequestException(
+              `Insufficient warehouse stock for spare part "${sparePart.name}".`,
+            );
+
+          // Reduce warehouse stock
+          await this.prisma.sparePart.update({
+            where: { id: item.id },
+            data: { stock: { decrement: item.quantityUsed } },
+          });
+        } else if (item.source === 'technician') {
+          // Reduce technician stock
+          const techStockRecord = await this.prisma.technicianStock.findUnique({
+            where: {
+              technicianId_sparePartId: {
+                technicianId: userId,
+                sparePartId: item.id,
+              },
+            },
+          });
+          if (
+            !techStockRecord ||
+            techStockRecord.quantity < item.quantityUsed
+          ) {
+            throw new BadRequestException(
+              `Insufficient technician stock for spare part "${sparePart.name}".`,
+            );
+          }
+          await this.prisma.technicianStock.update({
+            where: { id: techStockRecord.id },
+            data: { quantity: { decrement: item.quantityUsed } },
+          });
+        }
 
         const usedSparePart = await this.prisma.serviceUsedProduct.create({
           data: {
@@ -807,18 +982,16 @@ export class ServiceRequestsService {
           include: { sparePart: true, confirmedUser: true },
         });
 
-        await this.prisma.sparePart.update({
-          where: { id: item.id },
-          data: { stock: { decrement: item.quantityUsed } },
-        });
-
-        await this.prisma.sparePartStockHistory.create({
-          data: {
-            sparePartId: item.id,
-            quantityChange: -item.quantityUsed,
-            reason: `Used in Service Request #${requestId}`,
-          },
-        });
+        // Log stock history for warehouse stock only
+        if (item.source === 'warehouse') {
+          await this.prisma.sparePartStockHistory.create({
+            data: {
+              sparePartId: item.id,
+              quantityChange: -item.quantityUsed,
+              reason: `Used in Service Request #${requestId}`,
+            },
+          });
+        }
 
         addedItems.push(usedSparePart);
       }
@@ -856,6 +1029,15 @@ export class ServiceRequestsService {
       where: { requestId },
       include: {
         product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            price: true,
+          },
+        },
+        sparePart: {
+          // ✅ Include sparePart with needed fields
           select: {
             id: true,
             name: true,

@@ -205,6 +205,7 @@ export class ServiceRequestsController {
         id: string;
         quantityUsed: number;
         notes?: string;
+        source: 'warehouse' | 'technician'; // NEW field added
       }>;
     },
   ) {
