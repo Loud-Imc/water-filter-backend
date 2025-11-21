@@ -73,6 +73,7 @@ export class ServiceRequestsService {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
       include: {
+        acknowledgedBy: true,
         requestedBy: { include: { role: true } },
         approvedBy: true,
         assignedTo: true,
@@ -80,6 +81,7 @@ export class ServiceRequestsService {
         region: true,
         workLogs: true,
         workMedia: true,
+        reassignmentHistory: true,
         approvalHistory: {
           include: { approver: true },
           orderBy: { approvedAt: 'asc' },
@@ -380,6 +382,13 @@ export class ServiceRequestsService {
       },
     });
 
+    const reAssigned = await this.prisma.serviceRequest.count({
+      where: {
+        ...baseConditions,
+        status: 'RE_ASSIGNED',
+      },
+    });
+
     // In Progress
     const inProgress = await this.prisma.serviceRequest.count({
       where: {
@@ -439,6 +448,9 @@ export class ServiceRequestsService {
         assigned: await this.prisma.serviceRequest.count({
           where: { assignedToId: userId, status: 'ASSIGNED' },
         }),
+        reAssigned: await this.prisma.serviceRequest.count({
+          where: { assignedToId: userId, status: 'RE_ASSIGNED' },
+        }),
         inProgress: await this.prisma.serviceRequest.count({
           where: { assignedToId: userId, status: 'IN_PROGRESS' },
         }),
@@ -456,6 +468,7 @@ export class ServiceRequestsService {
       inProgress,
       workCompleted,
       completed,
+      reAssigned,
       rejected,
       byType: byType.map((item) => ({
         type: item.type,
@@ -492,102 +505,222 @@ export class ServiceRequestsService {
     reassignedById: string,
     reason: string,
   ) {
-    const request = await this.findOne(id);
+    const originalRequest = await this.findOne(id);
     const reassigner = await this.prisma.user.findUnique({
       where: { id: reassignedById },
       include: { role: true },
     });
 
-    if (!reassigner) {
-      throw new NotFoundException('Reassigner not found');
-    }
+    if (!reassigner) throw new NotFoundException('Reassigner not found');
 
-    // ✅ ONLY ALLOW ASSIGNED STATUS (before work starts)
-    if (request.status !== 'ASSIGNED') {
+    if (['IN_PROGRESS'].includes(originalRequest.status)) {
       throw new ForbiddenException(
-        `Can only reassign technicians when status is ASSIGNED. Current status: ${request.status}`,
+        `Cannot reassign while work in progress. Status: ${originalRequest.status}`,
       );
     }
 
-    // ✅ VERIFY REASSIGNER HAS PERMISSION
-    const allowedRoles = [
-      'Super Admin',
-      'Service Admin',
-      'Service Manager',
-      'Service Team Lead',
+    const allowedStatuses = [
+      'WORK_COMPLETED',
+      'COMPLETED',
+      'ASSIGNED',
+      'RE_ASSIGNED',
+      'RE_INSTALLATION',
     ];
-    if (!allowedRoles.includes(reassigner.role.name)) {
+    if (!allowedStatuses.includes(originalRequest.status)) {
       throw new ForbiddenException(
-        'Insufficient permissions to reassign technician',
+        `Reassignment not allowed in status: ${originalRequest.status}`,
       );
     }
 
-    // ✅ VALIDATE NEW TECHNICIAN
+    if (
+      ![
+        'Super Admin',
+        'Service Admin',
+        'Service Manager',
+        'Service Team Lead',
+      ].includes(reassigner.role.name)
+    ) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
+
     const newTechnician = await this.prisma.user.findUnique({
       where: { id: newTechnicianId },
       include: { role: true },
     });
 
-    if (!newTechnician || newTechnician.role.name !== 'Technician') {
+    if (!newTechnician || newTechnician.role.name !== 'Technician')
       throw new BadRequestException('Invalid new technician');
-    }
 
-    if (newTechnician.id === request.assignedToId) {
-      throw new BadRequestException(
-        'Technician is already assigned to this request',
+    const isPostWork = ['WORK_COMPLETED', 'COMPLETED', 'RE_ASSIGNED'].includes(
+      originalRequest.status,
+    );
+
+    if (newTechnician.id === originalRequest.assignedToId && !isPostWork)
+      throw new BadRequestException('Technician already assigned');
+
+    if (isPostWork) {
+      // CREATE A NEW SERVICE REQUEST BASED ON ORIGINAL
+      const newRequest = await this.prisma.serviceRequest.create({
+        data: {
+          type: originalRequest.type,
+          description: originalRequest.description,
+          priority: originalRequest.priority,
+          requestedById: originalRequest.requestedById,
+          regionId: originalRequest.regionId,
+          customerId: originalRequest.customerId,
+          categoryId: originalRequest.categoryId,
+          installationId: originalRequest.installationId,
+          assignedToId: newTechnicianId,
+          status: 'RE_ASSIGNED',
+          salesApproved: false,
+          postWorkReassignCount: 0,
+        },
+      });
+
+      // ✅ CREATE REASSIGNMENT HISTORY FOR THE NEW REQUEST (not the old one)
+      await this.prisma.reassignmentHistory.create({
+        data: {
+          requestId: newRequest.id, // Link to NEW request ID
+          reassignedBy: reassignedById,
+          previousTechId: originalRequest.assignedToId,
+          newTechId: newTechnicianId,
+          reason,
+        },
+      });
+
+      // ✅ ALSO CREATE A HISTORY RECORD FOR THE ORIGINAL REQUEST (optional for audit)
+      await this.prisma.reassignmentHistory.create({
+        data: {
+          requestId: id, // Link to ORIGINAL request ID
+          reassignedBy: reassignedById,
+          previousTechId: originalRequest.assignedToId,
+          newTechId: newTechnicianId,
+          reason,
+        },
+      });
+
+      // Fetch the new request with all relations including reassignmentHistory
+      const newRequestWithHistory = await this.prisma.serviceRequest.findUnique(
+        {
+          where: { id: newRequest.id },
+          include: {
+            assignedTo: true,
+            reassignmentHistory: {
+              include: {
+                reassigner: true,
+                previousTech: true,
+                newTech: true,
+              },
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+        },
       );
+
+      // Notify new technician
+      await this.notificationsService.notifyRequestAssigned(
+        newRequest.id,
+        newTechnicianId,
+      );
+
+      console.log(
+        'New Request with Reassignment History:',
+        newRequestWithHistory,
+      );
+      return newRequestWithHistory;
+    } else {
+      // PRE-WORK REASSIGNMENT - Update existing request
+
+      // Create reassignment history for original request
+      await this.prisma.reassignmentHistory.create({
+        data: {
+          requestId: id,
+          reassignedBy: reassignedById,
+          previousTechId: originalRequest.assignedToId,
+          newTechId: newTechnicianId,
+          reason,
+        },
+      });
+
+      const updatedRequest = await this.prisma.serviceRequest.update({
+        where: { id },
+        data: {
+          assignedToId: newTechnicianId,
+          status: 'ASSIGNED',
+          acknowledgedById: null,
+          acknowledgedAt: null,
+          acknowledgmentComments: null,
+        },
+        include: {
+          assignedTo: true,
+          reassignmentHistory: {
+            include: {
+              reassigner: true,
+              previousTech: true,
+              newTech: true,
+            },
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+      });
+
+      // Notify old and new technicians
+      if (originalRequest.assignedToId) {
+        await this.notificationsService.createNotification(
+          reassignedById,
+          originalRequest.assignedToId,
+          `Service request #${id} reassigned from you. Reason: ${reason}`,
+        );
+      }
+      await this.notificationsService.notifyRequestAssigned(
+        id,
+        newTechnicianId,
+      );
+
+      return updatedRequest;
     }
+  }
 
-    // ✅ GET OLD TECHNICIAN FOR NOTIFICATION
-    const oldTechnician = request.assignedToId
-      ? await this.prisma.user.findUnique({
-          where: { id: request.assignedToId },
-        })
-      : null;
+  async reassignCompletedService({
+    requestId,
+    newTechnicianId,
+    reason,
+    reassignedBy,
+  }: {
+    requestId: string;
+    newTechnicianId: string;
+    reason: string;
+    reassignedBy: string;
+  }) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+    });
+    if (!request) throw new NotFoundException();
 
-    // ✅ CREATE REASSIGNMENT HISTORY (AUDIT TRAIL)
+    if (!['WORK_COMPLETED', 'COMPLETED'].includes(request.status))
+      throw new BadRequestException('Request not eligible for reassignment');
+
     await this.prisma.reassignmentHistory.create({
       data: {
-        requestId: id,
-        reassignedBy: reassignedById,
+        requestId,
+        reassignedBy: reassignedBy,
         previousTechId: request.assignedToId,
         newTechId: newTechnicianId,
         reason,
       },
     });
 
-    // ✅ UPDATE REQUEST
-    const updatedRequest = await this.prisma.serviceRequest.update({
-      where: { id },
+    await this.prisma.serviceRequest.update({
+      where: { id: requestId },
       data: {
         assignedToId: newTechnicianId,
-      },
-      include: {
-        assignedTo: true,
-        reassignmentHistory: {
-          include: {
-            reassigner: true,
-            previousTech: true,
-            newTech: true,
-          },
-          orderBy: { createdAt: 'desc' },
-        },
+        status: 'ASSIGNED',
+        acknowledgedById: null,
+        acknowledgedAt: null,
+        acknowledgmentComments: null,
       },
     });
-
-    // ✅ NOTIFY OLD TECHNICIAN
-    if (oldTechnician) {
-      await this.notificationsService.createNotification(
-        reassignedById,
-        oldTechnician.id,
-        `Service request #${id} has been reassigned from you. Reason: ${reason}`,
-      );
-    }
-
-    // ✅ NOTIFY NEW TECHNICIAN
-    await this.notificationsService.notifyRequestAssigned(id, newTechnicianId);
-
-    return updatedRequest;
+    return { message: 'Reassignment successful' };
   }
 
   async getReassignmentHistory(id: string) {
@@ -1258,12 +1391,22 @@ export class ServiceRequestsService {
       regionalBreakdown,
       customerActivity,
       productUsage,
+      qualityMetrics, // ✅ NEW
+      reassignmentAnalysis, // ✅ NEW
+      operationalMetrics, // ✅ NEW
+      sparePartUsage, // ✅ NEW
+      assemblyUsage,
     ] = await Promise.all([
       this.getServiceRequestsReport(query),
       this.getTechnicianPerformanceReport(query),
       this.getRegionalBreakdownReport(query),
       this.getCustomerActivityReport(query),
       this.getProductUsageReport(query),
+      this.getQualityMetrics(query), // ✅ NEW
+      this.getReassignmentAnalysis(query), // ✅ NEW
+      this.getOperationalEfficiency(query), // ✅ NEW
+      this.getSparePartUsageReport(query), // ✅ NEW
+      this.getAssemblyUsageReport(query),
     ]);
 
     return {
@@ -1276,7 +1419,99 @@ export class ServiceRequestsService {
       regionalBreakdown,
       customerActivity,
       productUsage,
+      qualityMetrics, // ✅ NEW
+      reassignmentAnalysis, // ✅ NEW
+      operationalMetrics, // ✅ NEW
+      sparePartUsage, // ✅ NEW
+      assemblyUsage, // ✅ NEW
       generatedAt: new Date(),
+    };
+  }
+
+  // Spare Part Usage Analytics
+  async getSparePartUsageReport(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    // Group by sparePartId and sum quantities
+    const sparePartUsage = await this.prisma.serviceUsedProduct.groupBy({
+      by: ['sparePartId'],
+      where: {
+        sparePartId: { not: null },
+        request: { createdAt: { gte: startDate, lte: endDate } },
+      },
+      _sum: { quantityUsed: true },
+      _count: true,
+    });
+
+    // Fetch spare part details for each group
+    const details = await Promise.all(
+      sparePartUsage
+        .filter((u) => u.sparePartId)
+        .map(async (usage) => {
+          const part = await this.prisma.sparePart.findUnique({
+            where: { id: usage.sparePartId! },
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              stock: true,
+              price: true,
+            },
+          });
+          return {
+            sparePartId: part?.id,
+            name: part?.name || 'Unknown',
+            sku: part?.sku || 'N/A',
+            currentStock: part?.stock || 0,
+            totalQuantityUsed: usage._sum.quantityUsed || 0,
+            timesUsed: usage._count,
+            estimatedValue: (part?.price || 0) * (usage._sum.quantityUsed || 0),
+          };
+        }),
+    );
+    return {
+      mostUsedSpareParts: details.sort(
+        (a, b) => b.totalQuantityUsed - a.totalQuantityUsed,
+      ),
+      totalSparePartsUsed: details.length,
+      totalSparePartsValue: details
+        .reduce((sum, p) => sum + p.estimatedValue, 0)
+        .toFixed(2),
+    };
+  }
+
+  // Assembly Usage Analytics
+  async getAssemblyUsageReport(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+    const assemblies = await this.prisma.assemblyHistory.findMany({
+      where: { assembledAt: { gte: startDate, lte: endDate } },
+      select: {
+        id: true,
+        product: { select: { id: true, name: true, sku: true } },
+        totalCost: true,
+        usedParts: {
+          select: {
+            sparePart: { select: { id: true, name: true } },
+            quantityUsed: true,
+          },
+        },
+      },
+    });
+
+    return {
+      totalAssemblies: assemblies.length,
+      totalAssemblyCost: assemblies
+        .reduce((sum, a) => sum + (a.totalCost || 0), 0)
+        .toFixed(2),
+      mostAssembledProducts: assemblies.reduce(
+        (acc, a) => {
+          const key = a.product?.name || 'Unknown';
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
+      usedPartsCount: assemblies.flatMap((a) => a.usedParts).length,
     };
   }
 
@@ -1567,22 +1802,32 @@ export class ServiceRequestsService {
   async getProductUsageReport(query: ReportQueryDto) {
     const { startDate, endDate } = this.getDateRange(query);
 
-    // Most used products
-    const productUsage: any = await this.prisma.serviceUsedProduct.groupBy({
+    const baseWhere = {
+      request: {
+        createdAt: { gte: startDate, lte: endDate },
+        ...(query.regionId && { regionId: query.regionId }),
+      },
+    };
+
+    // Group by productId and sum quantities
+    const productUsage = await this.prisma.serviceUsedProduct.groupBy({
       by: ['productId'],
-      where: {
-        confirmedAt: { gte: startDate, lte: endDate },
-      },
-      _sum: {
-        quantityUsed: true,
-      },
+      where: baseWhere,
+      _sum: { quantityUsed: true },
       _count: true,
     });
 
+    console.log('product usage:', productUsage);
+
+    // ✅ FILTER OUT NULL PRODUCT IDs BEFORE QUERYING
+    const validProductUsage = productUsage.filter(
+      (usage) => usage.productId !== null,
+    );
+
     const productDetails: any = await Promise.all(
-      productUsage.map(async (usage) => {
+      validProductUsage.map(async (usage) => {
         const product: any = await this.prisma.product.findUnique({
-          where: { id: usage.productId },
+          where: { id: usage.productId! }, // ✅ Non-null assertion since we filtered
           select: {
             id: true,
             name: true,
@@ -1605,34 +1850,29 @@ export class ServiceRequestsService {
       }),
     );
 
+    // Sort by most used
+    const mostUsedProducts = productDetails.sort(
+      (a: any, b: any) => b.totalQuantityUsed - a.totalQuantityUsed,
+    );
+
     // Low stock products
     const lowStockProducts = await this.prisma.product.findMany({
-      where: {
-        stock: { lte: 5 },
-      },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        stock: true,
-        price: true,
-      },
+      where: { stock: { lt: 10 } },
+      select: { id: true, name: true, sku: true, stock: true, price: true },
       take: 10,
     });
 
-    // Total product value consumed
+    // Total value consumed
     const totalValueConsumed = productDetails.reduce(
-      (sum, p) => sum + Number(p.estimatedValue),
+      (sum: number, p: any) => sum + p.estimatedValue,
       0,
     );
 
     return {
-      mostUsedProducts: productDetails
-        .sort((a, b) => b.totalQuantityUsed - a.totalQuantityUsed)
-        .slice(0, 10),
+      mostUsedProducts,
       lowStockProducts,
       totalValueConsumed: totalValueConsumed.toFixed(2),
-      totalProductsUsed: productUsage.length,
+      totalProductsUsed: productDetails.length,
     };
   }
 
@@ -1742,5 +1982,195 @@ export class ServiceRequestsService {
     });
 
     return serviceRequest;
+  }
+
+  // ✅ NEW: Quality Metrics Report
+  async getQualityMetrics(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    const baseWhere = {
+      createdAt: { gte: startDate, lte: endDate },
+      ...(query.regionId && { regionId: query.regionId }),
+    };
+
+    // Total completed requests
+    const totalCompleted = await this.prisma.serviceRequest.count({
+      where: { ...baseWhere, status: 'COMPLETED' },
+    });
+
+    // First-time fix rate (completed without reassignment)
+    const firstTimeFix = await this.prisma.serviceRequest.count({
+      where: {
+        ...baseWhere,
+        status: 'COMPLETED',
+        postWorkReassignCount: 0,
+      },
+    });
+
+    // Total reassignments
+    const totalReassignments = await this.prisma.reassignmentHistory.count({
+      where: {
+        createdAt: { gte: startDate, lte: endDate },
+      },
+    });
+
+    // Requests with reassignments
+    const requestsWithReassignment = await this.prisma.serviceRequest.count({
+      where: {
+        ...baseWhere,
+        postWorkReassignCount: { gt: 0 },
+      },
+    });
+
+    // Average reassignments per request
+    const allRequests = await this.prisma.serviceRequest.findMany({
+      where: baseWhere,
+      select: { postWorkReassignCount: true },
+    });
+
+    const avgReassignments =
+      allRequests.length > 0
+        ? allRequests.reduce((sum, r) => sum + r.postWorkReassignCount, 0) /
+          allRequests.length
+        : 0;
+
+    // Work media upload compliance
+    const completedWithMedia = await this.prisma.serviceRequest.count({
+      where: {
+        ...baseWhere,
+        status: 'COMPLETED',
+        workMedia: { some: {} },
+      },
+    });
+
+    return {
+      firstTimeFixRate:
+        totalCompleted > 0
+          ? ((firstTimeFix / totalCompleted) * 100).toFixed(1)
+          : '0',
+      reworkRate:
+        totalCompleted > 0
+          ? (((totalCompleted - firstTimeFix) / totalCompleted) * 100).toFixed(
+              1,
+            )
+          : '0',
+      totalReassignments,
+      avgReassignmentsPerRequest: avgReassignments.toFixed(2),
+      workMediaUploadCompliance:
+        totalCompleted > 0
+          ? ((completedWithMedia / totalCompleted) * 100).toFixed(1)
+          : '0',
+    };
+  }
+
+  // ✅ NEW: Reassignment Analysis Report
+  async getReassignmentAnalysis(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    // Total reassignments in period
+    const allReassignments = await this.prisma.reassignmentHistory.findMany({
+      where: {
+        createdAt: { gte: startDate, lte: endDate },
+      },
+      include: {
+        request: {
+          select: { status: true },
+        },
+      },
+    });
+
+    // Separate pre-work and post-work reassignments
+    const preWorkReassignments = allReassignments.filter(
+      (r) =>
+        !['WORK_COMPLETED', 'COMPLETED', 'RE_ASSIGNED'].includes(
+          r.request.status,
+        ),
+    );
+
+    const postWorkReassignments = allReassignments.filter((r) =>
+      ['WORK_COMPLETED', 'COMPLETED', 'RE_ASSIGNED'].includes(r.request.status),
+    );
+
+    // Group by reason
+    const reasonGroups = allReassignments.reduce(
+      (acc, r) => {
+        acc[r.reason] = (acc[r.reason] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    const topReassignmentReasons = Object.entries(reasonGroups)
+      .map(([reason, count]) => ({
+        reason,
+        count,
+        percentage: ((count / allReassignments.length) * 100).toFixed(1),
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    // Most reassigned technicians
+    const techReassignments = await this.prisma.reassignmentHistory.groupBy({
+      by: ['previousTechId', 'newTechId'],
+      where: {
+        createdAt: { gte: startDate, lte: endDate },
+      },
+      _count: true,
+    });
+
+    return {
+      totalReassignments: allReassignments.length,
+      preWorkReassignments: preWorkReassignments.length,
+      postWorkReassignments: postWorkReassignments.length,
+      topReassignmentReasons,
+    };
+  }
+
+  // ✅ NEW: Operational Efficiency Report
+  async getOperationalEfficiency(query: ReportQueryDto) {
+    const { startDate, endDate } = this.getDateRange(query);
+
+    // Backlog count (PENDING_APPROVAL, APPROVED, ASSIGNED not started)
+    const backlogCount = await this.prisma.serviceRequest.count({
+      where: {
+        status: { in: ['PENDING_APPROVAL', 'APPROVED', 'ASSIGNED'] },
+        createdAt: { lte: endDate },
+      },
+    });
+
+    // Aging analysis
+    const now = new Date();
+    const agingRequests = await this.prisma.serviceRequest.findMany({
+      where: {
+        status: { notIn: ['COMPLETED', 'REJECTED'] },
+        createdAt: { lte: endDate },
+      },
+      select: { createdAt: true },
+    });
+
+    const agingRanges = {
+      '0-7 days': 0,
+      '8-14 days': 0,
+      '15-30 days': 0,
+      '30+ days': 0,
+    };
+
+    agingRequests.forEach((req) => {
+      const daysPending = Math.floor(
+        (now.getTime() - req.createdAt.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      if (daysPending <= 7) agingRanges['0-7 days']++;
+      else if (daysPending <= 14) agingRanges['8-14 days']++;
+      else if (daysPending <= 30) agingRanges['15-30 days']++;
+      else agingRanges['30+ days']++;
+    });
+
+    return {
+      backlogCount,
+      agingRequests: Object.entries(agingRanges).map(([range, count]) => ({
+        ageRange: range,
+        count,
+      })),
+    };
   }
 }

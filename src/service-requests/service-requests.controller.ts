@@ -156,6 +156,22 @@ export class ServiceRequestsController {
     );
   }
 
+  // Your API controller method
+  @Post('/:id/reassign-rework')
+  reassignForRework(
+    @Param('id') id: string,
+    @Body() dto: { newTechnicianId: string; reason: string },
+    @Req() req,
+  ) {
+    const reassignedBy: any = req.user.id;
+    return this.serviceRequestsService.reassignCompletedService({
+      requestId: id,
+      newTechnicianId: dto.newTechnicianId,
+      reason: dto.reason,
+      reassignedBy,
+    });
+  }
+
   @Get(':id/customer-service-history')
   @RequirePermissions('services.view')
   getCustomerServiceHistory(@Param('id') serviceRequestId: string) {
@@ -284,4 +300,28 @@ export class ServiceRequestsController {
   async getTechniciansWithWorkload(@Query('regionId') regionId?: string) {
     return this.serviceRequestsService.getTechniciansWithWorkload(regionId);
   }
+
+  @Get('reports/quality-metrics')
+  @RequirePermissions('reports.view')
+  async getQualityMetrics(@Query() query: ReportQueryDto) {
+    return this.serviceRequestsService.getQualityMetrics(query);
+  }
+
+  @Get('reports/reassignment-analysis')
+  @RequirePermissions('reports.view')
+  async getReassignmentAnalysis(@Query() query: ReportQueryDto) {
+    return this.serviceRequestsService.getReassignmentAnalysis(query);
+  }
+
+  @Get('reports/operational-efficiency')
+  @RequirePermissions('reports.view')
+  async getOperationalEfficiency(@Query() query: ReportQueryDto) {
+    return this.serviceRequestsService.getOperationalEfficiency(query);
+  }
+
+  // @Get('reports/trend-analysis')
+  // @RequirePermissions('reports.view')
+  // getTrendAnalysis(@Query() query: ReportQueryDto) {
+  //   return this.serviceRequestsService.getTrendAnalysis(query);
+  // }
 }

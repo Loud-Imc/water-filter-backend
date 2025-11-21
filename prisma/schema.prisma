@@ -25,6 +25,7 @@ enum RequestStatus {
   APPROVED
   ASSIGNED
   IN_PROGRESS
+  RE_ASSIGNED     // <-- New enum value for reassigned after work complete
   WORK_COMPLETED
   COMPLETED
   REJECTED
@@ -119,7 +120,7 @@ model Customer {
   name          String
   address       String
   primaryPhone  String   @unique
-  phoneNumbers  Json?
+  phoneNumbers  String[]
   email         String?
   regionId      String
   latitude      Float?
@@ -175,6 +176,7 @@ model ServiceRequest {
   assignedToId           String?
   regionId               String
   customerId             String
+  postWorkReassignCount  Int @default(0) 
   installationId         String?
   acknowledgedById       String?
   acknowledgedAt         DateTime?
