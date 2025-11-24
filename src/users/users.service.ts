@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -13,6 +14,9 @@ import {
 import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+
+import { ConflictException } from '@nestjs/common';
 
 @Injectable()
 export class UsersService {
@@ -103,45 +107,56 @@ export class UsersService {
       throw new BadRequestException('Invalid role selected');
     }
 
-    // ✅ Get default permissions for this role
+    // Get default permissions for this role
     const defaultPermissions = getDefaultPermissionsForRole(role.name);
     console.log(`Default permissions for ${role.name}:`, defaultPermissions);
 
-    // ✅ Merge custom permissions with default permissions
+    // Merge custom permissions avoiding duplicates
     let finalPermissions: string[] = [...defaultPermissions];
-
     if (dto.customPermissions && Array.isArray(dto.customPermissions)) {
-      // Add custom permissions (avoiding duplicates)
       finalPermissions = [
         ...new Set([...finalPermissions, ...dto.customPermissions]),
       ];
     }
-
     console.log('Final permissions:', finalPermissions);
 
-    // Create user with permissions stored as array
-    const newUser = await this.prisma.user.create({
-      data: {
-        name: dto.name,
-        email: dto.email,
-        password: hashedPassword,
-        phone: dto.phone,
-        roleId: dto.roleId,
-        regionId: dto.regionId,
-        isExternal: dto.isExternal || false,
-        createdById: dto.createdById,
-        status: 'ACTIVE',
-        // ✅ Store as JSON array in customPermissions field
-        customPermissions: finalPermissions,
-      },
-      include: {
-        role: true,
-        region: true,
-      },
-    });
+    try {
+      // Create user with permissions stored as array
+      const newUser = await this.prisma.user.create({
+        data: {
+          name: dto.name,
+          email: dto.email,
+          password: hashedPassword,
+          phone: dto.phone,
+          roleId: dto.roleId,
+          regionId: dto.regionId === '' ? null : dto.regionId,
+          isExternal: dto.isExternal || false,
+          createdById: dto.createdById,
+          status: 'ACTIVE',
+          customPermissions: finalPermissions,
+        },
+        include: {
+          role: true,
+          region: true,
+        },
+      });
 
-    const { password, ...userWithoutPassword } = newUser;
-    return userWithoutPassword;
+      const { password, ...userWithoutPassword } = newUser;
+      return userWithoutPassword;
+    } catch (error) {
+      if (error instanceof PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          // Unique constraint failed
+          const target = error.meta?.target as string[] | undefined;
+          if (target && target.includes('email')) {
+            throw new ConflictException('Email already exists');
+          }
+        }
+      }
+      // Log error if needed
+      console.error('Error creating user:', error);
+      throw new InternalServerErrorException('Failed to create user');
+    }
   }
 
   async update(id: string, dto: UpdateUserDto) {

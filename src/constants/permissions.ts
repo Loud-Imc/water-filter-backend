@@ -500,6 +500,16 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'assembly.execute',
     'stock.view',
   ],
+
+  'Tele Caller': [
+    'dashboard.view',
+    'customers.view',
+    'customers.create',
+    'customers.edit',
+    'services.view',
+    'services.create',
+    'reports.view',
+  ],
 };
 
 // ✅ Helper function to get default permissions for a role
