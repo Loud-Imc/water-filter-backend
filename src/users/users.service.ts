@@ -366,7 +366,6 @@ export class UsersService {
   }
 
   async delete(id: string) {
-
     console.log('Deleting user with id:', id);
     await this.findOne(id);
     await this.prisma.user.delete({ where: { id } });
@@ -430,12 +429,19 @@ export class UsersService {
         'Sales Team Lead',
         'Technician',
         'Salesman',
+        'Tele Caller',
       ],
-      'Service Admin': ['Service Manager', 'Service Team Lead', 'Technician'],
+      'Service Admin': [
+        'Service Manager',
+        'Service Team Lead',
+        'Technician',
+        'Tele Caller',
+      ],
       'Sales Admin': ['Sales Manager', 'Sales Team Lead', 'Salesman'],
-      'Service Manager': ['Service Team Lead', 'Technician'],
+      'Service Manager': ['Service Team Lead', 'Technician', 'Tele Caller'],
       'Sales Manager': ['Sales Team Lead', 'Salesman'],
-      'Service Team Lead': ['Technician'],
+      'Service Team Lead': ['Technician', 'Tele Caller'],
+      'Tele Caller': ['Technician'],
       'Sales Team Lead': ['Salesman'],
     };
 
