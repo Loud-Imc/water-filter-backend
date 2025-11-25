@@ -82,6 +82,7 @@ export class ServiceRequestsService {
         workLogs: true,
         workMedia: true,
         reassignmentHistory: true,
+        installation: true,
         approvalHistory: {
           include: { approver: true },
           orderBy: { approvedAt: 'asc' },
@@ -1927,6 +1928,7 @@ export class ServiceRequestsService {
 
   // ✅ UPDATE: Create method to handle new workflow
   async create(dto: CreateServiceRequestDto, userId: string) {
+    console.log('create service dto :', dto);
     // Validate that assigned technician exists and is active
     const technician = await this.prisma.user.findFirst({
       where: {
@@ -1957,6 +1959,7 @@ export class ServiceRequestsService {
         regionId: dto.regionId,
         requestedById: userId,
         categoryId: dto.categoryId,
+        installationId: dto.installationId,
         assignedToId: dto.assignedToId, // ✅ Assign directly
         priority: dto.priority || 'NORMAL', // ✅ Set priority
         status: 'ASSIGNED', // ✅ Skip DRAFT, PENDING_APPROVAL, APPROVED

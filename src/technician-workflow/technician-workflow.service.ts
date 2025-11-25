@@ -18,7 +18,7 @@ export class TechnicianWorkflowService {
       where: { id: dto.requestId },
     });
 
-    console.log('request : ', request)
+    console.log('request : ', request);
     if (!request) {
       throw new NotFoundException('Service request not found');
     }
@@ -27,10 +27,10 @@ export class TechnicianWorkflowService {
       throw new ForbiddenException('Not assigned to you');
     }
 
-    // ✅ ADD: Check if status is ASSIGNED
-    if (request.status !== 'ASSIGNED') {
+    // ✅ Allow only ASSIGNED or RE_ASSIGNED
+    if (request.status !== 'ASSIGNED' && request.status !== 'RE_ASSIGNED') {
       throw new BadRequestException(
-        'Work can only be started on assigned requests',
+        'Work can only be started on assigned or reassigned requests',
       );
     }
 
@@ -55,8 +55,8 @@ export class TechnicianWorkflowService {
         startTime: new Date(),
       },
     });
- 
-    console.log('dto :', dto.requestId)
+
+    console.log('dto :', dto.requestId);
     // ✅ ADD: Update ServiceRequest status to IN_PROGRESS
     await this.prisma.serviceRequest.update({
       where: { id: dto.requestId },

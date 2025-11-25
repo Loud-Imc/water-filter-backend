@@ -11,7 +11,7 @@ export class TechniciansService {
     return this.prisma.serviceRequest.findMany({
       where: {
         assignedToId: technicianId,
-        status: { in: ['ASSIGNED', 'IN_PROGRESS'] },
+        status: { in: ['ASSIGNED', 'IN_PROGRESS', 'RE_ASSIGNED'] },
       },
       include: {
         customer: true,
