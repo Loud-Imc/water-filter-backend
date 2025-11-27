@@ -159,6 +159,63 @@ export class UsersService {
     }
   }
 
+  // async update(id: string, dto: UpdateUserDto) {
+  //   const user = await this.prisma.user.findUnique({
+  //     where: { id },
+  //     include: { role: true },
+  //   });
+
+  //   if (!user) {
+  //     throw new NotFoundException('User not found');
+  //   }
+
+  //   const updateData: any = {
+  //     name: dto.name,
+  //     email: dto.email,
+  //     phone: dto.phone,
+  //     regionId: dto.regionId,
+  //     status: dto.status,
+  //     isExternal: dto.isExternal,
+  //   };
+
+  //   // ✅ If role is changing, recalculate permissions
+  //   if (dto.roleId && dto.roleId !== user.roleId) {
+  //     const newRole = await this.prisma.role.findUnique({
+  //       where: { id: dto.roleId },
+  //     });
+
+  //     if (!newRole) {
+  //       throw new BadRequestException('Invalid role selected');
+  //     }
+
+  //     const newDefaultPermissions = getDefaultPermissionsForRole(newRole.name);
+  //     const existingPermissions = (user.customPermissions as string[]) || [];
+
+  //     // Merge new role defaults with existing custom permissions
+  //     updateData.customPermissions = [
+  //       ...new Set([...newDefaultPermissions, ...existingPermissions]),
+  //     ];
+  //     updateData.roleId = dto.roleId;
+
+  //     console.log(
+  //       `Role changed from ${user.role.name} to ${newRole.name}, updated permissions:`,
+  //       updateData.customPermissions,
+  //     );
+  //   }
+
+  //   const updatedUser = await this.prisma.user.update({
+  //     where: { id },
+  //     data: updateData,
+  //     include: {
+  //       role: true,
+  //       region: true,
+  //     },
+  //   });
+
+  //   const { password, ...userWithoutPassword } = updatedUser;
+  //   return userWithoutPassword;
+  // }
+
   async update(id: string, dto: UpdateUserDto) {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -169,17 +226,26 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
+    // 🆕 Check if user is Super Admin
+    const isSuperAdmin = user.role.name === 'Super Admin';
+
+    // 🆕 Prevent role change for Super Admin
+    if (isSuperAdmin && dto.roleId && dto.roleId !== user.roleId) {
+      throw new BadRequestException('Cannot change role of Super Admin');
+    }
+
+    // Base update data (always included)
     const updateData: any = {
       name: dto.name,
       email: dto.email,
       phone: dto.phone,
-      regionId: dto.regionId,
       status: dto.status,
-      isExternal: dto.isExternal,
     };
 
-    // ✅ If role is changing, recalculate permissions
-    if (dto.roleId && dto.roleId !== user.roleId) {
+    // 🆕 Determine the target role (new role or current role)
+    let targetRoleName = user.role.name;
+
+    if (!isSuperAdmin && dto.roleId && dto.roleId !== user.roleId) {
       const newRole = await this.prisma.role.findUnique({
         where: { id: dto.roleId },
       });
@@ -188,10 +254,12 @@ export class UsersService {
         throw new BadRequestException('Invalid role selected');
       }
 
+      targetRoleName = newRole.name;
+
+      // Recalculate permissions when role changes
       const newDefaultPermissions = getDefaultPermissionsForRole(newRole.name);
       const existingPermissions = (user.customPermissions as string[]) || [];
 
-      // Merge new role defaults with existing custom permissions
       updateData.customPermissions = [
         ...new Set([...newDefaultPermissions, ...existingPermissions]),
       ];
@@ -201,6 +269,16 @@ export class UsersService {
         `Role changed from ${user.role.name} to ${newRole.name}, updated permissions:`,
         updateData.customPermissions,
       );
+    }
+
+    // 🆕 Handle Technician-specific fields
+    if (targetRoleName === 'Technician') {
+      updateData.regionId = dto.regionId || null;
+      updateData.isExternal = dto.isExternal || false;
+    } else {
+      // For non-Technician roles, clear these fields
+      updateData.regionId = null;
+      updateData.isExternal = false;
     }
 
     const updatedUser = await this.prisma.user.update({

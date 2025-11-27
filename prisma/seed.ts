@@ -64,7 +64,9 @@ async function main() {
   console.log('✨ Seed completed successfully!');
   console.log('\n📋 SEEDED DATA SUMMARY:');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('✅ 4 Roles created (Super Admin, Tele Caller, Service Admin, Technician)');
+  console.log(
+    '✅ 4 Roles created (Super Admin, Tele Caller, Service Admin, Technician)',
+  );
   console.log('✅ 0 Regions (regions removed)');
   console.log('✅ 1 Super Admin created');
   console.log('✅ 0 Technicians');
