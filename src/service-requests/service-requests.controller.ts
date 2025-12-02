@@ -330,7 +330,7 @@ export class ServiceRequestsController {
   //   return this.serviceRequestsService.getTrendAnalysis(query);
   // }
 
-  @Post('import/excel')
+  @Post('import/installation')
   @RequirePermissions('services.import') // Only admins
   @UseInterceptors(FileInterceptor('file'))
   importFromExcel(@UploadedFile() file: Express.Multer.File, @Req() req: any) {
