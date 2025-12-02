@@ -8,6 +8,10 @@ import {
   UseGuards,
   Req,
   Query,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  Request,
 } from '@nestjs/common';
 import { ServiceRequestsService } from './service-requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -17,6 +21,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { ReportQueryDto } from './dto/report-query.dto';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 // ✅ UPDATED: Added PermissionsGuard
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
@@ -324,4 +329,117 @@ export class ServiceRequestsController {
   // getTrendAnalysis(@Query() query: ReportQueryDto) {
   //   return this.serviceRequestsService.getTrendAnalysis(query);
   // }
+
+  @Post('import/excel')
+  @RequirePermissions('services.import') // Only admins
+  @UseInterceptors(FileInterceptor('file'))
+  importFromExcel(@UploadedFile() file: Express.Multer.File, @Req() req: any) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    if (!file.originalname.match(/\.(xlsx|xls)$/)) {
+      throw new BadRequestException('Only Excel files are allowed');
+    }
+
+    const uploadedBy = req.user.userId;
+
+    return this.serviceRequestsService.importInstallationData(file, uploadedBy);
+  }
+
+  @Post('import/products')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('services.import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importProducts(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    if (!file.originalname.match(/\.(xlsx|xls)$/)) {
+      throw new BadRequestException('Only Excel files are allowed');
+    }
+
+    const result = await this.serviceRequestsService.importProductsData(
+      file,
+      req.user.userId,
+    );
+
+    return result;
+  }
+
+  @Post('import/spare-parts')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('services.import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importSpareParts(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    if (!file.originalname.match(/\.(xlsx|xls)$/)) {
+      throw new BadRequestException('Only Excel files are allowed');
+    }
+
+    const result = await this.serviceRequestsService.importSparePartsData(
+      file,
+      req.user.userId,
+    );
+
+    return result;
+  }
+
+  @Post('import/technicians')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('services.import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importTechnicians(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    if (!file.originalname.match(/\.(xlsx|xls)$/)) {
+      throw new BadRequestException('Only Excel files are allowed');
+    }
+
+    const result = await this.serviceRequestsService.importTechniciansData(
+      file,
+      req.user.userId,
+    );
+
+    return result;
+  }
+
+   @Post('import/service-requests')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('services.import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importServiceRequests(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    if (!file.originalname.match(/\.(xlsx|xls)$/)) {
+      throw new BadRequestException('Only Excel files are allowed');
+    }
+
+    const result = await this.serviceRequestsService.importServiceRequestsData(
+      file,
+      req.user.userId,
+    );
+
+    return result;
+  }
 }

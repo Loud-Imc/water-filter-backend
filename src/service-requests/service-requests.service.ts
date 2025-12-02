@@ -9,6 +9,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
 import { ReportQueryDto } from './dto/report-query.dto';
+import * as XLSX from 'xlsx';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class ServiceRequestsService {
@@ -2175,5 +2177,1530 @@ export class ServiceRequestsService {
         count,
       })),
     };
+  }
+  /**
+   * Clean technician name - extract first name from combined entries
+   */
+  private cleanTechnicianName(name: string): string | null {
+    if (!name) return null;
+
+    let cleaned = name.trim();
+
+    // Split by delimiters and take first name
+    const delimiters = ['/', '&', ',', '\n', '(', ' AND ', ' and '];
+    for (const delimiter of delimiters) {
+      if (cleaned.includes(delimiter)) {
+        cleaned = cleaned.split(delimiter)[0].trim();
+        break;
+      }
+    }
+
+    return cleaned.toUpperCase();
+  }
+
+  /**
+   * Clean phone number - extract 10 digits
+   */
+  private cleanPhone(phone: any): string | null {
+    if (!phone) return null;
+
+    // Convert to string and remove all non-digits
+    const phoneStr = phone.toString().replace(/\D/g, '');
+
+    // Take last 10 digits for Indian phone numbers
+    if (phoneStr.length >= 10) {
+      return phoneStr.slice(-10);
+    }
+
+    return phoneStr.length === 10 ? phoneStr : null;
+  }
+
+  /**
+   * Parse installation date from Excel
+   */
+  private parseInstallationDate(dateValue: any): Date | null {
+    if (!dateValue) return null;
+
+    try {
+      // Excel stores dates as numbers (days since 1900-01-01)
+      if (typeof dateValue === 'number') {
+        const excelEpoch = new Date(1900, 0, 1);
+        const date = new Date(
+          excelEpoch.getTime() + (dateValue - 2) * 24 * 60 * 60 * 1000,
+        );
+        return date;
+      }
+
+      // Try parsing string dates
+      const parsed = new Date(dateValue);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Main import function - FIXED VERSION
+   */
+  // ============================================
+  // UPDATED IMPORT SERVICE WITH CATEGORY DETECTION
+  // service-requests.service.ts
+  // ============================================
+
+  /**
+   * Detect product category based on product name keywords
+   */
+  private detectProductCategory(productName: string): string {
+    if (!productName) return 'RO+UF'; // Default
+
+    const productUpper = productName.toUpperCase().trim();
+
+    // Category detection rules (order matters - check most specific first)
+
+    // VESSEL - Contains size specifications
+    if (
+      productUpper.includes('VESSEL') ||
+      productUpper.includes('VESAL') ||
+      productUpper.includes('1354') ||
+      productUpper.includes('1465') ||
+      productUpper.includes('16*65') ||
+      productUpper.includes('21*62') ||
+      productUpper.includes('13*54') ||
+      productUpper.includes('14*65') ||
+      productUpper.includes('12*48')
+    ) {
+      return 'VESSEL';
+    }
+
+    // COMMERCIAL - Contains LPH (Liters Per Hour)
+    if (
+      productUpper.includes('COMMERCIAL') ||
+      productUpper.includes('LPH') ||
+      productUpper.includes('25LPH') ||
+      productUpper.includes('50LPH') ||
+      productUpper.includes('100LPH')
+    ) {
+      return 'COMMERCIAL';
+    }
+
+    // UNDERSINK
+    if (
+      productUpper.includes('UNDER SINK') ||
+      productUpper.includes('UNDERSINK') ||
+      productUpper.includes('SINGLE MEMBRANE') ||
+      productUpper.includes('DOUBLE MEMBRANE')
+    ) {
+      return 'UNDERSINK';
+    }
+
+    // UV - Beta series
+    if (productUpper.includes('BETA') || productUpper.includes('BETE')) {
+      return 'UV';
+    }
+
+    // UV+UF - Zeta Gold
+    if (productUpper.includes('ZETA GOLD')) {
+      return 'UV+UF';
+    }
+
+    // RO - Zeta Plus
+    if (productUpper.includes('ZETA PLUS') || productUpper.includes('ZETA+')) {
+      return 'RO';
+    }
+
+    // RO+UV+UF - Alpha Gold
+    if (productUpper.includes('ALPHA GOLD')) {
+      return 'RO+UV+UF';
+    }
+
+    // RO+UV+ALKALINE+MINERALS - Planet Gold, Alfa Plus
+    if (
+      productUpper.includes('PLANET GOLD') ||
+      productUpper.includes('ALFA PLUS')
+    ) {
+      return 'RO+UV+ALKALINE+MINERALS';
+    }
+
+    // RO+UF - Alpha, Planet (not Gold), Planet Plus
+    if (
+      productUpper.includes('ALPHA') ||
+      productUpper.includes('PLANET PLUS') ||
+      (productUpper.includes('PLANET') && !productUpper.includes('GOLD'))
+    ) {
+      return 'RO+UF';
+    }
+
+    // Default fallback
+    return 'RO+UF';
+  }
+
+  /**
+   * Create or get product categories based on predefined list
+   */
+  private async ensureProductCategories(): Promise<Map<string, string>> {
+    const categoryMap = new Map<string, string>();
+
+    const categories = [
+      { name: 'UV', description: 'Ultraviolet water purifiers' },
+      { name: 'UV+UF', description: 'UV with Ultrafiltration' },
+      { name: 'RO', description: 'Reverse Osmosis purifiers' },
+      { name: 'RO+UF', description: 'RO with Ultrafiltration' },
+      { name: 'RO+UV+UF', description: 'RO with UV and UF' },
+      {
+        name: 'RO+UV+ALKALINE+MINERALS',
+        description: 'Advanced RO with minerals',
+      },
+      { name: 'UNDERSINK', description: 'Under-sink water purifiers' },
+      { name: 'COMMERCIAL', description: 'Commercial/Industrial systems' },
+      { name: 'VESSEL', description: 'Water softener vessels' },
+    ];
+
+    for (const cat of categories) {
+      const category = await this.prisma.productCategory.upsert({
+        where: { name: cat.name },
+        update: {},
+        create: {
+          name: cat.name,
+          description: cat.description,
+          isActive: true,
+        },
+      });
+
+      categoryMap.set(cat.name, category.id);
+    }
+
+    console.log(`✅ Ensured ${categories.length} product categories exist`);
+    return categoryMap;
+  }
+
+  /**
+   * Main import function - UPDATED WITH CATEGORY DETECTION
+   */
+  async importInstallationData(
+    file: Express.Multer.File,
+    uploadedBy: string,
+  ): Promise<{
+    success: boolean;
+    summary: {
+      regions: number;
+      technicians: number;
+      products: number;
+      customers: number;
+      installations: number;
+      serviceRequests: number;
+    };
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+
+    try {
+      console.log('📊 Starting Excel import...');
+
+      // 1. Parse Excel file
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+      });
+
+      if (rawData.length < 2) {
+        throw new BadRequestException('Excel file is empty or has no data');
+      }
+
+      const headerRow = rawData[1];
+      const dataRows = rawData.slice(2);
+
+      console.log(`Found headers: ${headerRow.slice(0, 5).join(', ')}...`);
+      console.log(`Processing ${dataRows.length} data rows...`);
+
+      // Map headers to indices
+      const colIndex = {
+        name: headerRow.indexOf('NAME'),
+        place: headerRow.indexOf('PLACE'),
+        landmark: headerRow.indexOf('LAND MARK'),
+        city: headerRow.indexOf('CITY'),
+        primaryPhone: headerRow.indexOf('PRIMARY PHONE NUMBER'),
+        additionalPhone: headerRow.indexOf('ADDITIONAL PHONE NUMBER'),
+        district: headerRow.indexOf('DISTRICT'),
+        taluk: headerRow.indexOf('TALUK'),
+        productName: headerRow.indexOf('PRODUCT NAME'),
+        technician: headerRow.indexOf('TECHNICIAN'),
+        installationDate: headerRow.indexOf('INSTALLATION DATE'),
+      };
+
+      if (
+        colIndex.name === -1 ||
+        colIndex.primaryPhone === -1 ||
+        colIndex.district === -1
+      ) {
+        throw new BadRequestException(
+          'Required columns missing: NAME, PRIMARY PHONE NUMBER, or DISTRICT',
+        );
+      }
+
+      console.log('Column mapping successful ✓');
+
+      // 2. ✅ NEW: Ensure all product categories exist
+      const categoryIdMap = await this.ensureProductCategories();
+
+      // 3. Get technician role
+      const technicianRole = await this.prisma.role.findFirst({
+        where: { name: 'Technician' },
+      });
+
+      if (!technicianRole) {
+        throw new BadRequestException('Technician role not found in system');
+      }
+
+      // 4. Get admin user for service requests
+      const adminUser = await this.prisma.user.findUnique({
+        where: { id: uploadedBy },
+      });
+
+      if (!adminUser) {
+        throw new BadRequestException('Admin user not found');
+      }
+
+      // Maps to track created entities
+      const regionMap = new Map<string, string>();
+      const technicianMap = new Map<string, string>();
+      const productMap = new Map<string, string>();
+      const processedPhones = new Set<string>();
+
+      const skipTechnicians = [
+        'DISTRIBUTER',
+        'FREELANSER',
+        'HIMALAYA WATER TECHNOLOGY',
+        'KEMTECH',
+        'AKHIL LATHEEF',
+        'IRSHAD LATHEEF',
+        'LATHEEF AKHIL',
+        'LATHEEF IRSHAD',
+        'AKHIL IRSHAD',
+      ];
+
+      let stats = {
+        regions: 0,
+        technicians: 0,
+        products: 0,
+        customers: 0,
+        installations: 0,
+        serviceRequests: 0,
+      };
+
+      // 5. Process each data row
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i];
+
+        try {
+          const customerName = row[colIndex.name]?.toString().trim();
+          const place = row[colIndex.place]?.toString().trim();
+          const district = row[colIndex.district]?.toString().trim();
+          const taluk = row[colIndex.taluk]?.toString().trim();
+          const city = row[colIndex.city]?.toString().trim();
+          const landmark = row[colIndex.landmark]?.toString().trim();
+          const primaryPhone = this.cleanPhone(row[colIndex.primaryPhone]);
+          const additionalPhone = this.cleanPhone(
+            row[colIndex.additionalPhone],
+          );
+          const productName = row[colIndex.productName]?.toString().trim();
+          const technicianName = row[colIndex.technician]?.toString().trim();
+          const installationDate = this.parseInstallationDate(
+            row[colIndex.installationDate],
+          );
+
+          // Skip if essential data missing
+          if (!customerName || !primaryPhone || !district) {
+            errors.push(
+              `Row ${i + 3}: Missing essential data (name/phone/district)`,
+            );
+            continue;
+          }
+
+          // Skip duplicate customers
+          if (processedPhones.has(primaryPhone)) {
+            continue;
+          }
+          processedPhones.add(primaryPhone);
+
+          // ==================================================
+          // A. CREATE/GET REGION
+          // ==================================================
+          const regionKey = `Kerala|${district}|${taluk || 'NULL'}|${city || 'NULL'}`;
+          let regionId = regionMap.get(regionKey);
+
+          if (!regionId) {
+            const regionName = taluk ? `${district} - ${taluk}` : district;
+
+            const region = await this.prisma.region.upsert({
+              where: { name: regionName },
+              update: {},
+              create: {
+                name: regionName,
+                state: 'Kerala',
+                district: district,
+                taluk: taluk || null,
+                city: city || null,
+                pincode: null,
+              },
+            });
+
+            regionId = region.id;
+            regionMap.set(regionKey, regionId);
+            stats.regions++;
+
+            if (stats.regions % 10 === 0) {
+              console.log(`  📍 Created ${stats.regions} regions...`);
+            }
+          }
+
+          // ==================================================
+          // B. CREATE/GET TECHNICIAN
+          // ==================================================
+          let technicianId: any = null;
+
+          if (technicianName) {
+            const cleanedTechName = this.cleanTechnicianName(technicianName);
+
+            if (cleanedTechName && !skipTechnicians.includes(cleanedTechName)) {
+              technicianId = technicianMap.get(cleanedTechName);
+
+              if (!technicianId) {
+                const techEmail = `${cleanedTechName.toLowerCase().replace(/\s+/g, '.')}@waterfilter.com`;
+
+                const existingTech = await this.prisma.user.findUnique({
+                  where: { email: techEmail },
+                });
+
+                if (existingTech) {
+                  technicianId = existingTech.id;
+                } else {
+                  const hashedPassword = await bcrypt.hash('technician123', 10);
+
+                  const displayName = cleanedTechName
+                    .split(' ')
+                    .map((word) => word.charAt(0) + word.slice(1).toLowerCase())
+                    .join(' ');
+
+                  const newTech = await this.prisma.user.create({
+                    data: {
+                      name: displayName,
+                      email: techEmail,
+                      password: hashedPassword,
+                      roleId: technicianRole.id,
+                      status: 'BLOCKED',
+                      isExternal: false,
+                    },
+                  });
+
+                  technicianId = newTech.id;
+                  stats.technicians++;
+
+                  if (stats.technicians % 5 === 0) {
+                    console.log(
+                      `  🔧 Created ${stats.technicians} technicians...`,
+                    );
+                  }
+                }
+
+                technicianMap.set(cleanedTechName, technicianId);
+              }
+            }
+          }
+
+          // ==================================================
+          // C. ✅ NEW: CREATE/GET PRODUCT WITH CATEGORY DETECTION
+          // ==================================================
+          let productCategoryId: any = null;
+
+          if (productName) {
+            let productId = productMap.get(productName);
+
+            if (!productId) {
+              const existingProduct = await this.prisma.product.findUnique({
+                where: { name: productName },
+              });
+
+              if (existingProduct) {
+                productId = existingProduct.id;
+                productCategoryId = existingProduct.categoryId;
+              } else {
+                // ✅ Detect category based on product name
+                const detectedCategory =
+                  this.detectProductCategory(productName);
+                const categoryId = categoryIdMap.get(detectedCategory);
+
+                const newProduct = await this.prisma.product.create({
+                  data: {
+                    name: productName,
+                    description: 'Imported from Excel',
+                    categoryId: categoryId,
+                    price: 0,
+                    stock: 0,
+                    hasWarranty: false,
+                  },
+                });
+
+                productId = newProduct.id;
+                productCategoryId = categoryId;
+                stats.products++;
+
+                if (stats.products % 20 === 0) {
+                  console.log(`  📦 Created ${stats.products} products...`);
+                }
+              }
+
+              productMap.set(productName, productId);
+            }
+          }
+
+          // ==================================================
+          // D. CREATE CUSTOMER
+          // ==================================================
+          const phoneNumbers =
+            additionalPhone && additionalPhone !== primaryPhone
+              ? [additionalPhone]
+              : [];
+
+          const customer = await this.prisma.customer.upsert({
+            where: { primaryPhone: primaryPhone },
+            update: {},
+            create: {
+              name: customerName,
+              address: place || 'N/A',
+              primaryPhone: primaryPhone,
+              phoneNumbers: phoneNumbers,
+              email: null,
+              regionId: regionId,
+            },
+          });
+          stats.customers++;
+
+          // ==================================================
+          // E. CREATE INSTALLATION
+          // ==================================================
+          const installation = await this.prisma.installation.create({
+            data: {
+              customerId: customer.id,
+              regionId: regionId,
+              name: `Installation at ${place || customerName}`.substring(
+                0,
+                100,
+              ),
+              address: place || 'N/A',
+              landmark: landmark || null,
+              contactPerson: customerName,
+              contactPhone: primaryPhone,
+              installationType: 'Standard',
+              isActive: true,
+              isPrimary: true,
+            },
+          });
+          stats.installations++;
+
+          // ==================================================
+          // F. CREATE SERVICE REQUEST
+          // ==================================================
+          await this.prisma.serviceRequest.create({
+            data: {
+              type: 'INSTALLATION',
+              status: 'COMPLETED',
+              priority: 'NORMAL',
+              description: `Installation of ${productName || 'Water Filter'}`,
+              requestedById: adminUser.id,
+              assignedToId: technicianId,
+              regionId: regionId,
+              customerId: customer.id,
+              installationId: installation.id,
+              categoryId: productCategoryId,
+              createdAt: installationDate || new Date(),
+            },
+          });
+          stats.serviceRequests++;
+
+          // Progress logging
+          if ((i + 1) % 100 === 0) {
+            console.log(`  ✓ Processed ${i + 1}/${dataRows.length} rows...`);
+          }
+        } catch (rowError) {
+          const errorMsg = `Row ${i + 3}: ${rowError.message}`;
+          errors.push(errorMsg);
+          console.error(errorMsg);
+        }
+      }
+
+      console.log('\n✅ Import completed successfully!');
+      console.log('📊 Final Statistics:');
+      console.log(`   - Regions: ${stats.regions}`);
+      console.log(`   - Technicians: ${stats.technicians}`);
+      console.log(`   - Products: ${stats.products}`);
+      console.log(`   - Customers: ${stats.customers}`);
+      console.log(`   - Installations: ${stats.installations}`);
+      console.log(`   - Service Requests: ${stats.serviceRequests}`);
+      console.log(`   - Errors: ${errors.length}`);
+
+      return {
+        success: true,
+        summary: stats,
+        errors: errors,
+      };
+    } catch (error) {
+      console.error('❌ Import failed:', error);
+      throw new BadRequestException(`Import failed: ${error.message}`);
+    }
+  }
+  async importProductsData(
+    file: Express.Multer.File,
+    uploadedBy: string,
+  ): Promise<{
+    success: boolean;
+    summary: {
+      categoriesCreated: number;
+      productsCreated: number;
+      productsUpdated: number;
+    };
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+
+    try {
+      console.log('📦 Starting Product import...');
+
+      // 1. Parse Excel file
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      // Get data as JSON
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+      if (jsonData.length === 0) {
+        throw new BadRequestException('Excel file is empty');
+      }
+
+      console.log(`Processing ${jsonData.length} products...`);
+
+      // 2. Ensure all categories exist
+      const categoryMap = new Map<string, string>();
+      const categories = [
+        { name: 'UV', description: 'Ultraviolet water purifiers' },
+        { name: 'UV+UF', description: 'UV with Ultrafiltration' },
+        { name: 'RO', description: 'Reverse Osmosis purifiers' },
+        { name: 'RO+UF', description: 'RO with Ultrafiltration' },
+        { name: 'RO+UV+UF', description: 'RO with UV and UF' },
+        {
+          name: 'RO+UV+ALKALINE+MINERALS',
+          description: 'Advanced RO with minerals',
+        },
+        { name: 'UNDERSINK', description: 'Under-sink water purifiers' },
+        { name: 'COMMERCIAL', description: 'Commercial/Industrial systems' },
+        { name: 'VESSEL', description: 'Water softener vessels' },
+      ];
+
+      let categoriesCreated = 0;
+      for (const cat of categories) {
+        const category = await this.prisma.productCategory.upsert({
+          where: { name: cat.name },
+          update: {},
+          create: {
+            name: cat.name,
+            description: cat.description,
+            isActive: true,
+          },
+        });
+
+        categoryMap.set(cat.name, category.id);
+
+        // Check if it was created (not just retrieved)
+        const wasNew = await this.prisma.productCategory.findFirst({
+          where: {
+            name: cat.name,
+            createdAt: {
+              gte: new Date(Date.now() - 1000), // Created in last second
+            },
+          },
+        });
+        if (wasNew) categoriesCreated++;
+      }
+
+      console.log(`✓ Ensured ${categories.length} categories exist`);
+
+      let stats = {
+        categoriesCreated: categoriesCreated,
+        productsCreated: 0,
+        productsUpdated: 0,
+      };
+
+      // 3. Process each product
+      for (let i = 0; i < jsonData.length; i++) {
+        const row = jsonData[i];
+
+        try {
+          // Extract data
+          const category = row['CATEGORY']?.toString().trim();
+          const modelName = row['MODEL']?.toString().trim();
+          const price = row['PRICE INR'] ? parseFloat(row['PRICE INR']) : 0;
+          const warranty = row['WARRANTY'] ? parseInt(row['WARRANTY']) : 12;
+          const stock = row['STOCK QTY'] ? parseInt(row['STOCK QTY']) : 0;
+
+          // Validation
+          if (!category || !modelName) {
+            errors.push(`Row ${i + 2}: Missing CATEGORY or MODEL`);
+            continue;
+          }
+
+          // Get category ID
+          const categoryId = categoryMap.get(category);
+          if (!categoryId) {
+            errors.push(`Row ${i + 2}: Invalid category "${category}"`);
+            continue;
+          }
+
+          // Check if product exists
+          const existingProduct = await this.prisma.product.findUnique({
+            where: { name: modelName },
+          });
+
+          if (existingProduct) {
+            // Update existing product
+            await this.prisma.product.update({
+              where: { id: existingProduct.id },
+              data: {
+                categoryId: categoryId,
+                price: price || existingProduct.price,
+                stock: stock,
+                hasWarranty: warranty > 0,
+                description: `Warranty: ${warranty} months`,
+              },
+            });
+            stats.productsUpdated++;
+          } else {
+            // Create new product
+            await this.prisma.product.create({
+              data: {
+                name: modelName,
+                description: `Warranty: ${warranty} months`,
+                categoryId: categoryId,
+                price: price || 0,
+                stock: stock,
+                hasWarranty: warranty > 0,
+              },
+            });
+            stats.productsCreated++;
+          }
+
+          // Progress logging
+          if ((i + 1) % 5 === 0) {
+            console.log(
+              `  ✓ Processed ${i + 1}/${jsonData.length} products...`,
+            );
+          }
+        } catch (rowError) {
+          const errorMsg = `Row ${i + 2}: ${rowError.message}`;
+          errors.push(errorMsg);
+          console.error(errorMsg);
+        }
+      }
+
+      console.log('\n✅ Product import completed!');
+      console.log('📊 Statistics:');
+      console.log(`   - Categories created: ${stats.categoriesCreated}`);
+      console.log(`   - Products created: ${stats.productsCreated}`);
+      console.log(`   - Products updated: ${stats.productsUpdated}`);
+      console.log(`   - Errors: ${errors.length}`);
+
+      return {
+        success: true,
+        summary: stats,
+        errors: errors,
+      };
+    } catch (error) {
+      console.error('❌ Product import failed:', error);
+      throw new BadRequestException(`Import failed: ${error.message}`);
+    }
+  }
+
+  async importSparePartsData(
+    file: Express.Multer.File,
+    uploadedBy: string,
+  ): Promise<{
+    success: boolean;
+    summary: {
+      sparePartsCreated: number;
+      sparePartsUpdated: number;
+    };
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+
+    try {
+      console.log('🔧 Starting Spare Parts import...');
+
+      // 1. Parse Excel file
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      // Get data as JSON
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+      if (jsonData.length === 0) {
+        throw new BadRequestException('Excel file is empty');
+      }
+
+      console.log(`Processing ${jsonData.length} spare parts...`);
+
+      let stats = {
+        sparePartsCreated: 0,
+        sparePartsUpdated: 0,
+      };
+
+      // 2. Process each spare part
+      for (let i = 0; i < jsonData.length; i++) {
+        const row = jsonData[i];
+
+        try {
+          // Extract data
+          const spareName = row['SPARE NAME']?.toString().trim();
+          const price = row['PRICE INR'] ? parseFloat(row['PRICE INR']) : 0;
+          const warrantyMonths = row['WARRANTY']
+            ? parseInt(row['WARRANTY'])
+            : 0;
+          const stock = row['STOCK QTY'] ? parseInt(row['STOCK QTY']) : 0;
+
+          // Validation
+          if (!spareName) {
+            errors.push(`Row ${i + 2}: Missing SPARE NAME`);
+            continue;
+          }
+
+          // Calculate warranty
+          const hasWarranty = warrantyMonths > 0;
+          const warrantyYears =
+            warrantyMonths >= 12 ? Math.floor(warrantyMonths / 12) : null;
+
+          // Build description with warranty info
+          let description = '';
+          if (hasWarranty) {
+            if (warrantyYears && warrantyYears > 0) {
+              description = `Warranty: ${warrantyYears} year${warrantyYears > 1 ? 's' : ''} (${warrantyMonths} months)`;
+            } else {
+              description = `Warranty: ${warrantyMonths} months`;
+            }
+          } else {
+            description = 'No warranty';
+          }
+
+          // Check if spare part exists
+          const existingSparePart = await this.prisma.sparePart.findUnique({
+            where: { name: spareName },
+          });
+
+          if (existingSparePart) {
+            // Update existing spare part
+            await this.prisma.sparePart.update({
+              where: { id: existingSparePart.id },
+              data: {
+                price: price || existingSparePart.price,
+                stock: stock,
+                hasWarranty: hasWarranty,
+                warrantyMonths: warrantyMonths > 0 ? warrantyMonths : null,
+                warrantyYears: warrantyYears,
+                description: description,
+              },
+            });
+            stats.sparePartsUpdated++;
+          } else {
+            // Create new spare part
+            await this.prisma.sparePart.create({
+              data: {
+                name: spareName,
+                description: description,
+                price: price || 0,
+                stock: stock,
+                hasWarranty: hasWarranty,
+                warrantyMonths: warrantyMonths > 0 ? warrantyMonths : null,
+                warrantyYears: warrantyYears,
+              },
+            });
+            stats.sparePartsCreated++;
+          }
+
+          // Progress logging
+          if ((i + 1) % 10 === 0) {
+            console.log(
+              `  ✓ Processed ${i + 1}/${jsonData.length} spare parts...`,
+            );
+          }
+        } catch (rowError) {
+          const errorMsg = `Row ${i + 2}: ${rowError.message}`;
+          errors.push(errorMsg);
+          console.error(errorMsg);
+        }
+      }
+
+      console.log('\n✅ Spare parts import completed!');
+      console.log('📊 Statistics:');
+      console.log(`   - Spare parts created: ${stats.sparePartsCreated}`);
+      console.log(`   - Spare parts updated: ${stats.sparePartsUpdated}`);
+      console.log(`   - Errors: ${errors.length}`);
+
+      return {
+        success: true,
+        summary: stats,
+        errors: errors,
+      };
+    } catch (error) {
+      console.error('❌ Spare parts import failed:', error);
+      throw new BadRequestException(`Import failed: ${error.message}`);
+    }
+  }
+
+  private cleanTechnicianPhone(phone: any): string | null {
+    if (!phone) return null;
+
+    // Convert to string and remove all non-digits
+    const phoneStr = phone.toString().replace(/\D/g, '');
+
+    // Take last 10 digits for Indian phone numbers
+    if (phoneStr.length >= 10) {
+      return phoneStr.slice(-10);
+    }
+
+    return phoneStr.length === 10 ? phoneStr : null;
+  }
+
+  /**
+   * Clean technician name
+   */
+  private cleanFreelanceTechnicianName(name: string): string | null {
+    if (!name) return null;
+
+    // Basic cleanup
+    let cleaned = name.trim();
+
+    // Remove special characters but keep spaces
+    cleaned = cleaned.replace(/[^a-zA-Z\s]/g, '');
+
+    // Capitalize first letter of each word
+    cleaned = cleaned
+      .split(' ')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+
+    return cleaned;
+  }
+
+  /**
+   * Import freelance technicians from Excel file
+   * Expected columns: full_name, phone_number, city, Experience years, Status, remarks, Area Covered
+   */
+  async importTechniciansData(
+    file: Express.Multer.File,
+    uploadedBy: string,
+  ): Promise<{
+    success: boolean;
+    summary: {
+      techniciansCreated: number;
+      techniciansUpdated: number;
+      techniciansSkipped: number;
+    };
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+
+    try {
+      console.log('👷 Starting Freelance Technicians import...');
+
+      // 1. Parse Excel file
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      // Get raw data with headers
+      const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+      });
+
+      if (rawData.length < 2) {
+        throw new BadRequestException('Excel file is empty or has no data');
+      }
+
+      // Row 0 has headers
+      const headerRow = rawData[0];
+      const dataRows = rawData.slice(1); // Data starts from row 1
+
+      console.log(`Found headers: ${headerRow.slice(0, 5).join(', ')}...`);
+      console.log(`Processing ${dataRows.length} technicians...`);
+
+      // Map headers to indices
+      const colIndex = {
+        fullName: headerRow.indexOf('full_name'),
+        phoneNumber: headerRow.indexOf('phone_number'),
+        city: headerRow.indexOf('city'),
+        experienceYears: headerRow.indexOf('Experience years'),
+        status: headerRow.indexOf('Status'),
+        remarks: headerRow.indexOf('remarks'),
+        areaCovered: headerRow.indexOf('Area Covered'),
+        installationCharge: headerRow.indexOf('Installation Charge'),
+        serviceCharge: headerRow.indexOf('Service Charge'),
+      };
+
+      // Validate required columns
+      if (colIndex.fullName === -1 || colIndex.phoneNumber === -1) {
+        throw new BadRequestException(
+          'Required columns missing: full_name or phone_number',
+        );
+      }
+
+      console.log('Column mapping successful ✓');
+
+      // 2. Get Technician role
+      const technicianRole = await this.prisma.role.findFirst({
+        where: { name: 'Technician' },
+      });
+
+      if (!technicianRole) {
+        throw new BadRequestException('Technician role not found in system');
+      }
+
+      let stats = {
+        techniciansCreated: 0,
+        techniciansUpdated: 0,
+        techniciansSkipped: 0,
+      };
+
+      // 3. Process each technician
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i];
+
+        try {
+          // Extract data
+          const fullName = row[colIndex.fullName]?.toString().trim();
+          const phoneNumber = this.cleanTechnicianPhone(
+            row[colIndex.phoneNumber],
+          );
+          const city = row[colIndex.city]?.toString().trim();
+          const experienceYears = row[colIndex.experienceYears];
+          const status = row[colIndex.status]?.toString().trim();
+          const remarks = row[colIndex.remarks]?.toString().trim();
+          const areaCovered = row[colIndex.areaCovered]?.toString().trim();
+
+          // Validation
+          if (!fullName || !phoneNumber) {
+            errors.push(`Row ${i + 2}: Missing full_name or phone_number`);
+            stats.techniciansSkipped++;
+            continue;
+          }
+
+          const cleanedName = this.cleanFreelanceTechnicianName(fullName);
+          if (!cleanedName) {
+            errors.push(`Row ${i + 2}: Invalid technician name`);
+            stats.techniciansSkipped++;
+            continue;
+          }
+
+          // Create email from phone number
+          const email = `tech${phoneNumber}@freelance.waterfilter.com`;
+
+          // Find or match region based on city
+          let regionId: string | null = null;
+          if (city) {
+            // Try to find region by city name or district
+            const region = await this.prisma.region.findFirst({
+              where: {
+                OR: [
+                  { city: { contains: city, mode: 'insensitive' } },
+                  { district: { contains: city, mode: 'insensitive' } },
+                  { name: { contains: city, mode: 'insensitive' } },
+                ],
+              },
+            });
+
+            if (region) {
+              regionId = region.id;
+            }
+          }
+
+          // Determine user status based on Status column
+          let userStatus: 'ACTIVE' | 'BLOCKED' = 'BLOCKED'; // Default to blocked
+          if (
+            status &&
+            (status.toLowerCase().includes('send contract') ||
+              status.toLowerCase().includes('details shared'))
+          ) {
+            userStatus = 'ACTIVE';
+          }
+
+          // Build description
+          const descriptionParts: string[] = [];
+          if (experienceYears) {
+            descriptionParts.push(`Experience: ${experienceYears} years`);
+          }
+          if (areaCovered) {
+            descriptionParts.push(`Area: ${areaCovered}`);
+          }
+          if (remarks) {
+            descriptionParts.push(`Notes: ${remarks}`);
+          }
+          const description = descriptionParts.join(' | ');
+
+          // Check if technician exists by email or phone
+          const existingTechnician = await this.prisma.user.findFirst({
+            where: {
+              OR: [{ email: email }, { phone: phoneNumber }],
+            },
+          });
+
+          if (existingTechnician) {
+            // Update existing technician
+            await this.prisma.user.update({
+              where: { id: existingTechnician.id },
+              data: {
+                name: cleanedName,
+                phone: phoneNumber,
+                regionId: regionId || existingTechnician.regionId,
+                status: userStatus,
+                isExternal: true,
+              },
+            });
+            stats.techniciansUpdated++;
+          } else {
+            // Create new technician
+            const hashedPassword = await bcrypt.hash('freelance123', 10);
+
+            await this.prisma.user.create({
+              data: {
+                name: cleanedName,
+                email: email,
+                password: hashedPassword,
+                phone: phoneNumber,
+                roleId: technicianRole.id,
+                regionId: regionId,
+                status: userStatus,
+                isExternal: true, // ✅ Mark as external/freelance
+                createdById: uploadedBy,
+              },
+            });
+            stats.techniciansCreated++;
+          }
+
+          // Progress logging
+          if ((i + 1) % 10 === 0) {
+            console.log(
+              `  ✓ Processed ${i + 1}/${dataRows.length} technicians...`,
+            );
+          }
+        } catch (rowError) {
+          const errorMsg = `Row ${i + 2}: ${rowError.message}`;
+          errors.push(errorMsg);
+          stats.techniciansSkipped++;
+          console.error(errorMsg);
+        }
+      }
+
+      console.log('\n✅ Freelance technicians import completed!');
+      console.log('📊 Statistics:');
+      console.log(`   - Technicians created: ${stats.techniciansCreated}`);
+      console.log(`   - Technicians updated: ${stats.techniciansUpdated}`);
+      console.log(`   - Technicians skipped: ${stats.techniciansSkipped}`);
+      console.log(`   - Errors: ${errors.length}`);
+
+      return {
+        success: true,
+        summary: stats,
+        errors: errors,
+      };
+    } catch (error) {
+      console.error('❌ Technician import failed:', error);
+      throw new BadRequestException(`Import failed: ${error.message}`);
+    }
+  }
+
+  // ============================================
+  // STEP 4: SERVICE REQUESTS IMPORT BACKEND
+  // ============================================
+
+  // ADD TO service-requests.service.ts
+
+  /**
+   * Clean phone number for matching
+   */
+  private cleanServicePhone(phone: any): string | null {
+    if (!phone) return null;
+
+    // Convert to string and remove all non-digits
+    const phoneStr = phone.toString().replace(/\D/g, '');
+
+    // Take last 10 digits for Indian phone numbers
+    if (phoneStr.length >= 10) {
+      return phoneStr.slice(-10);
+    }
+
+    return phoneStr.length === 10 ? phoneStr : null;
+  }
+
+  /**
+   * Clean technician name - trim and normalize
+   */
+  // private cleanTechnicianName(name: string): string {
+  //   if (!name) return '';
+  //   return name.trim().toUpperCase();
+  // }
+
+  /**
+   * Parse and normalize spare part names
+   */
+  private parseSparePartNames(spareText: string): string[] {
+    if (!spareText) return [];
+
+    // Split by comma or slash
+    const parts = spareText.split(/[,\/]/);
+
+    // Clean and normalize each part
+    return parts
+      .map((p) => p.trim().toUpperCase())
+      .filter((p) => p.length > 0)
+      .map((p) => {
+        // Normalize common variations
+        p = p.replace(/\s+/g, ' '); // Single spaces
+        p = p.replace(/SPUN\s*3/i, 'SPUN 3');
+        p = p.replace(/SPUN\s*1/i, 'SPUN 1');
+        return p;
+      });
+  }
+
+  /**
+   * Import service requests from Excel file
+   */
+  async importServiceRequestsData(
+    file: Express.Multer.File,
+    uploadedBy: string,
+  ): Promise<{
+    success: boolean;
+    summary: {
+      serviceRequestsCreated: number;
+      serviceRequestsSkipped: number;
+      customersCreated: number;
+      usedProductsLinked: number;
+      workLogsCreated: number;
+    };
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+
+    try {
+      console.log('🔧 Starting Service Requests import...');
+
+      // 1. Parse Excel file
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+      if (jsonData.length === 0) {
+        throw new BadRequestException('Excel file is empty');
+      }
+
+      console.log(`Processing ${jsonData.length} service requests...`);
+
+      let stats = {
+        serviceRequestsCreated: 0,
+        serviceRequestsSkipped: 0,
+        customersCreated: 0,
+        usedProductsLinked: 0,
+        workLogsCreated: 0,
+      };
+
+      // 2. Get system user for requestedBy
+      const systemUser = await this.prisma.user.findFirst({
+        where: {
+          OR: [{ email: uploadedBy }, { role: { name: 'Super Admin' } }],
+        },
+      });
+
+      if (!systemUser) {
+        throw new BadRequestException('System user not found');
+      }
+
+      // 3. Cache all technicians for matching
+      const allTechnicians = await this.prisma.user.findMany({
+        where: {
+          role: { name: 'Technician' },
+        },
+      });
+
+      const technicianMap = new Map<string, string>();
+      allTechnicians.forEach((tech) => {
+        const cleanName = this.cleanTechnicianName(tech.name);
+        if (cleanName) {
+          technicianMap.set(cleanName, tech.id);
+        }
+      });
+
+      console.log(`✓ Loaded ${technicianMap.size} technicians for matching`);
+
+      // 4. Cache all regions
+      const allRegions = await this.prisma.region.findMany();
+      console.log(`✓ Loaded ${allRegions.length} regions`);
+
+      // 5. Cache all spare parts for matching
+      const allSpareParts = await this.prisma.sparePart.findMany();
+      const sparePartMap = new Map<string, string>();
+      allSpareParts.forEach((spare) => {
+        const cleanName = spare.name.trim().toUpperCase();
+        sparePartMap.set(cleanName, spare.id);
+      });
+
+      console.log(`✓ Loaded ${sparePartMap.size} spare parts for matching`);
+
+      // 6. Process each service request
+      for (let i = 0; i < jsonData.length; i++) {
+        const row = jsonData[i];
+
+        try {
+          // Extract data
+          const phoneNumber = this.cleanServicePhone(row['PHONE NUMBER']);
+          const customerName = row['NAME & ADRESS']?.toString().trim();
+          const place = row['PLACE']?.toString().trim();
+          const technicianName = this.cleanTechnicianName(row['TECHNICIAN']);
+          const serviceDate = row['SERVICE BOOKING DATE'];
+          const callAttendDate = row['CALL ATTAND DATE'];
+          const usedSpares = row['USED SPAIR']?.toString().trim();
+          const warrantyStatus = row['WARRANTY IN/OUT']?.toString().trim();
+          const amount = row['AMOUNT'];
+          const remarks = row['REMARKS']?.toString().trim();
+          const feedback = row['CUSTOMER FEEDBACK']?.toString().trim();
+
+          // ✅ VALIDATION: Skip if no phone number
+          if (!phoneNumber) {
+            errors.push(`Row ${i + 2}: Missing phone number - SKIPPED`);
+            stats.serviceRequestsSkipped++;
+            continue;
+          }
+
+          // 7. Find or create customer
+          let customer = await this.prisma.customer.findFirst({
+            where: { primaryPhone: phoneNumber },
+            include: {
+              region: true,
+              installations: true,
+            },
+          });
+
+          let customerId: string;
+          let regionId: string;
+          let installationId: string | null = null;
+          let categoryId: string | null = null;
+
+          if (customer) {
+            // ✅ Existing customer - use their data
+            customerId = customer.id;
+            regionId = customer.regionId;
+
+            // Find most recent installation
+            if (customer.installations && customer.installations.length > 0) {
+              const latestInstallation = customer.installations.sort(
+                (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+              )[0];
+              installationId = latestInstallation.id;
+
+              // Get categoryId from previous service requests for this installation
+              const existingServiceRequest =
+                await this.prisma.serviceRequest.findFirst({
+                  where: { installationId: latestInstallation.id },
+                  orderBy: { createdAt: 'desc' },
+                });
+
+              if (existingServiceRequest && existingServiceRequest.categoryId) {
+                categoryId = existingServiceRequest.categoryId;
+              }
+            }
+          } else {
+            // ✅ New customer - create with region matching
+            stats.customersCreated++;
+
+            // Try to find region from place
+            let matchedRegion = allRegions.find(
+              (r) =>
+                r.city?.toLowerCase().includes(place?.toLowerCase()) ||
+                r.district?.toLowerCase().includes(place?.toLowerCase()) ||
+                r.name?.toLowerCase().includes(place?.toLowerCase()),
+            );
+
+            if (!matchedRegion) {
+              // Use first region as default if no match
+              matchedRegion = allRegions[0];
+              errors.push(
+                `Row ${i + 2}: Could not match place "${place}" to region, using default`,
+              );
+            }
+
+            regionId = matchedRegion.id;
+
+            // Create new customer
+            const newCustomer = await this.prisma.customer.create({
+              data: {
+                name: customerName || 'Unknown Customer',
+                primaryPhone: phoneNumber,
+                address: place || '',
+                regionId: regionId,
+              },
+            });
+
+            customerId = newCustomer.id;
+          }
+
+          // 8. Find technician
+          let assignedToId: string | null = null;
+          if (technicianName) {
+            assignedToId = technicianMap.get(technicianName) || null;
+            if (!assignedToId) {
+              errors.push(
+                `Row ${i + 2}: Technician "${technicianName}" not found`,
+              );
+            }
+          }
+
+          // 9. Build description
+          const descriptionParts: string[] = [];
+          if (remarks) descriptionParts.push(`Remarks: ${remarks}`);
+          if (feedback) descriptionParts.push(`Feedback: ${feedback}`);
+          if (warrantyStatus)
+            descriptionParts.push(`Warranty: ${warrantyStatus}`);
+          if (amount) descriptionParts.push(`Amount: ₹${amount}`);
+
+          const description =
+            descriptionParts.length > 0
+              ? descriptionParts.join(' | ')
+              : 'Historical service import';
+
+          // 10. Create service request
+          const serviceRequest = await this.prisma.serviceRequest.create({
+            data: {
+              type: 'SERVICE',
+              description: description,
+              status: 'COMPLETED',
+              priority: 'NORMAL',
+              salesApproved: true,
+              requestedById: systemUser.id,
+              assignedToId: assignedToId,
+              regionId: regionId,
+              customerId: customerId,
+              installationId: installationId,
+              categoryId: categoryId,
+              createdAt: serviceDate ? new Date(serviceDate) : new Date(),
+            },
+          });
+
+          stats.serviceRequestsCreated++;
+
+          // ✅ FIXED: WorkLog schema has startTime/endTime (not action/timestamp)
+          // 11. Create work log if call attend date exists
+          if (callAttendDate && assignedToId) {
+            const serviceDateTime = new Date(serviceDate || new Date());
+            const attendDateTime = new Date(callAttendDate);
+
+            // Calculate duration in minutes
+            const durationMinutes = Math.round(
+              (attendDateTime.getTime() - serviceDateTime.getTime()) /
+                (1000 * 60),
+            );
+
+            // Create single work log entry with start and end time
+            await this.prisma.workLog.create({
+              data: {
+                requestId: serviceRequest.id,
+                technicianId: assignedToId,
+                startTime: serviceDateTime,
+                endTime: attendDateTime,
+                duration: durationMinutes > 0 ? durationMinutes : null,
+                notes: 'Historical service import',
+              },
+            });
+
+            stats.workLogsCreated += 1;
+          }
+
+          // ✅ FIXED: ServiceUsedProduct has no 'type' field
+          // 12. Link used spare parts
+          if (usedSpares) {
+            const spareNames = this.parseSparePartNames(usedSpares);
+
+            for (const spareName of spareNames) {
+              // Try exact match first
+              let sparePartId = sparePartMap.get(spareName);
+
+              // Try fuzzy match if exact fails
+              if (!sparePartId) {
+                const fuzzyMatch = allSpareParts.find(
+                  (sp) =>
+                    sp.name.toUpperCase().includes(spareName) ||
+                    spareName.includes(sp.name.toUpperCase()),
+                );
+                if (fuzzyMatch) {
+                  sparePartId = fuzzyMatch.id;
+                }
+              }
+
+              if (sparePartId) {
+                await this.prisma.serviceUsedProduct.create({
+                  data: {
+                    requestId: serviceRequest.id,
+                    sparePartId: sparePartId, // Set spare part
+                    productId: null, // Not a product
+                    quantityUsed: 1,
+                    confirmedBy: systemUser.id,
+                    confirmedAt: new Date(),
+                  },
+                });
+                stats.usedProductsLinked++;
+              } else {
+                errors.push(
+                  `Row ${i + 2}: Spare part "${spareName}" not found in system`,
+                );
+              }
+            }
+          }
+
+          // Progress logging
+          if ((i + 1) % 50 === 0) {
+            console.log(
+              `  ✓ Processed ${i + 1}/${jsonData.length} service requests...`,
+            );
+          }
+        } catch (rowError) {
+          const errorMsg = `Row ${i + 2}: ${rowError.message}`;
+          errors.push(errorMsg);
+          stats.serviceRequestsSkipped++;
+          console.error(errorMsg);
+        }
+      }
+
+      console.log('\n✅ Service requests import completed!');
+      console.log('📊 Statistics:');
+      console.log(
+        `   - Service requests created: ${stats.serviceRequestsCreated}`,
+      );
+      console.log(
+        `   - Service requests skipped: ${stats.serviceRequestsSkipped}`,
+      );
+      console.log(`   - New customers created: ${stats.customersCreated}`);
+      console.log(`   - Used products linked: ${stats.usedProductsLinked}`);
+      console.log(`   - Work logs created: ${stats.workLogsCreated}`);
+      console.log(`   - Errors: ${errors.length}`);
+
+      return {
+        success: true,
+        summary: stats,
+        errors: errors,
+      };
+    } catch (error) {
+      console.error('❌ Service requests import failed:', error);
+      throw new BadRequestException(`Import failed: ${error.message}`);
+    }
   }
 }
