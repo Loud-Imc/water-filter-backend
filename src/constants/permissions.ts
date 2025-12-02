@@ -26,6 +26,7 @@ export const PERMISSION_ACTIONS = {
   MANAGE: 'manage', // ✅ NEW: For combined create/edit/delete
   EXECUTE: 'execute', // ✅ NEW: For assembly execution
   TRANSFER: 'transfer', // ✅ NEW: For stock transfers
+  IMPORT: 'import', // ✅ NEW: For importing service requests
 } as const;
 
 export interface Permission {
@@ -125,6 +126,13 @@ export const ALL_PERMISSIONS: Permission[] = [
     key: 'services.assign',
     label: 'Assign Technician',
     description: 'Assign technicians to services',
+  },
+    {
+    module: PERMISSION_MODULES.SERVICES,
+    action: PERMISSION_ACTIONS.IMPORT,
+    key: 'services.import',
+    label: 'Import Services',
+    description: 'Import service requests from external sources',
   },
 
   // ==========================================
