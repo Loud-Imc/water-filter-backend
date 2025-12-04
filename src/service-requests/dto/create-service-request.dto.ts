@@ -52,4 +52,12 @@ export class CreateServiceRequestDto {
   @IsString()
   @IsOptional()
   categoryId?: string | null;
+
+  @IsString()
+  @IsOptional()
+  productId?: string | null;
+
+  @IsString()
+  @IsOptional()
+  sparePartId?: string | null;
 }

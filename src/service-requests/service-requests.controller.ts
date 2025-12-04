@@ -40,8 +40,18 @@ export class ServiceRequestsController {
   // ✅ UPDATED: Permission-based
   @Get()
   @RequirePermissions('services.view')
-  findAll() {
-    return this.serviceRequestsService.findAll();
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('userId') userId?: string, // For technician filtering
+  ) {
+    return this.serviceRequestsService.findAll(
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 10,
+      status,
+      userId,
+    );
   }
 
   // ✅ UPDATED: Permission-based
@@ -302,8 +312,14 @@ export class ServiceRequestsController {
   // ✅ ADD: Get technicians with workload
   @Get('technicians/workload')
   @RequirePermissions('services.view')
-  async getTechniciansWithWorkload(@Query('regionId') regionId?: string) {
-    return this.serviceRequestsService.getTechniciansWithWorkload(regionId);
+  async getTechniciansWithWorkload(
+    @Query('regionId') regionId?: string,
+    @Query('query') query?: string,
+  ) {
+    return this.serviceRequestsService.getTechniciansWithWorkload(
+      regionId,
+      query,
+    );
   }
 
   @Get('reports/quality-metrics')
@@ -419,7 +435,7 @@ export class ServiceRequestsController {
     return result;
   }
 
-   @Post('import/service-requests')
+  @Post('import/service-requests')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @RequirePermissions('services.import')
   @UseInterceptors(FileInterceptor('file'))
