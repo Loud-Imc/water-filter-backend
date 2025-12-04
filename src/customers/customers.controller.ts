@@ -27,8 +27,16 @@ export class CustomersController {
   // ✅ UPDATED: Permission-based instead of role-based
   @Get()
   @RequirePermissions('customers.view')
-  findAll() {
-    return this.customersService.findAll();
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('regionId') regionId?: string,
+  ) {
+    return this.customersService.findAll(
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 10,
+      regionId,
+    );
   }
 
   // ✅ NEW: Search doesn't need special permissions (uses customers.view)

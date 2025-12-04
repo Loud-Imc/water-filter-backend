@@ -13,11 +13,34 @@ import { Prisma } from '@prisma/client';
 export class CustomersService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.customer.findMany({
-      include: { region: true },
-      orderBy: { name: 'asc' },
-    });
+  async findAll(page: number = 1, limit: number = 10, regionId?: string) {
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (regionId) {
+      where.regionId = regionId;
+    }
+
+    const [customers, total] = await Promise.all([
+      this.prisma.customer.findMany({
+        where,
+        include: { region: true },
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.customer.count({ where }),
+    ]);
+
+    return {
+      data: customers,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async searchCustomers(query: string, regionId?: string, limit: number = 20) {

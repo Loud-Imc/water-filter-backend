@@ -20,7 +20,9 @@ export class UploadsService {
     try {
       // Validate file exists
       if (!file) {
-        this.logger.warn(`Upload attempt with no file for request: ${requestId}`);
+        this.logger.warn(
+          `Upload attempt with no file for request: ${requestId}`,
+        );
         throw new BadRequestException('No file uploaded');
       }
 
@@ -45,7 +47,10 @@ export class UploadsService {
           },
         });
       } catch (error) {
-        this.logger.error(`Database error while fetching request ${requestId}:`, error);
+        this.logger.error(
+          `Database error while fetching request ${requestId}:`,
+          error,
+        );
         throw new InternalServerErrorException(
           'Failed to verify service request. Please try again.',
         );
@@ -53,10 +58,10 @@ export class UploadsService {
 
       if (!request) {
         this.logger.warn(`Service request not found: ${requestId}`);
-        
+
         // Clean up uploaded file since request doesn't exist
         this.cleanupFile(file.path);
-        
+
         throw new NotFoundException(
           `Service request with ID ${requestId} not found`,
         );
@@ -89,7 +94,10 @@ export class UploadsService {
           },
         });
       } catch (error) {
-        this.logger.error('Database error while creating work media record:', error);
+        this.logger.error(
+          'Database error while creating work media record:',
+          error,
+        );
 
         // Clean up uploaded file if database insert fails
         this.cleanupFile(file.path);

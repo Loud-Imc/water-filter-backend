@@ -57,18 +57,53 @@ export class ServiceRequestsService {
   //   return request;
   // }
 
-  async findAll() {
-    return this.prisma.serviceRequest.findMany({
-      include: {
-        requestedBy: { include: { role: true } },
-        approvedBy: true,
-        assignedTo: true,
-        customer: true,
-        region: true,
-        approvalHistory: { include: { approver: true } },
+  async findAll(
+    page: number = 1,
+    limit: number = 10,
+    status?: string,
+    userId?: string,
+  ) {
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+
+    // Filter by status if provided
+    if (status && status !== 'ALL') {
+      where.status = status;
+    }
+
+    // Filter by assigned technician if userId provided
+    if (userId) {
+      where.assignedToId = userId;
+    }
+
+    const [requests, total] = await Promise.all([
+      this.prisma.serviceRequest.findMany({
+        where,
+        include: {
+          requestedBy: { include: { role: true } },
+          approvedBy: true,
+          assignedTo: true,
+          customer: true,
+          region: true,
+          approvalHistory: { include: { approver: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.serviceRequest.count({ where }),
+    ]);
+
+    return {
+      data: requests,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
-      orderBy: { createdAt: 'desc' },
-    });
+    };
   }
 
   async findOne(id: string) {
@@ -1893,20 +1928,39 @@ export class ServiceRequestsService {
     });
   }
 
-  // ✅ ADD: Get all technicians with their workload
-  async getTechniciansWithWorkload(regionId?: string) {
+  // ✅ UPDATED: Get all technicians with their workload + search support
+  async getTechniciansWithWorkload(regionId?: string, query?: string) {
+    const where: any = {
+      role: { name: 'Technician' },
+      status: 'ACTIVE',
+    };
+
+    // Filter by region if provided
+    if (regionId) {
+      where.regionId = regionId;
+    }
+
+    // 🆕 Add search by name (case-insensitive)
+    if (query && query.length >= 2) {
+      where.name = {
+        contains: query,
+        mode: 'insensitive',
+      };
+    }
+
     const technicians = await this.prisma.user.findMany({
-      where: {
-        role: { name: 'Technician' },
-        status: 'ACTIVE',
-        ...(regionId && { regionId }),
-      },
+      where,
       select: {
         id: true,
         name: true,
         email: true,
+        isExternal: true, // 🆕 Added for badge display
+        regionId: true, // 🆕 Added for "Different Region" chip
         region: {
-          select: { name: true },
+          select: {
+            name: true,
+            id: true, // 🆕 Added for comparison
+          },
         },
       },
     });

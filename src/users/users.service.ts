@@ -269,6 +269,19 @@ export class UsersService {
         `Role changed from ${user.role.name} to ${newRole.name}, updated permissions:`,
         updateData.customPermissions,
       );
+    } else {
+      // 🆕 NEW: If customPermissions is empty/null, populate with defaults
+      const currentPermissions = (user.customPermissions as string[]) || [];
+
+      if (currentPermissions.length === 0) {
+        const defaultPermissions = getDefaultPermissionsForRole(user.role.name);
+        updateData.customPermissions = defaultPermissions;
+
+        console.log(
+          `Populating empty permissions for ${user.role.name}:`,
+          defaultPermissions,
+        );
+      }
     }
 
     // 🆕 Handle Technician-specific fields
@@ -383,6 +396,8 @@ export class UsersService {
       where: { id: userId },
       include: { role: true },
     });
+
+    console.log('Fetching permissions for user:', user);
 
     if (!user) {
       throw new NotFoundException('User not found');
