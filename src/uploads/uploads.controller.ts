@@ -5,6 +5,7 @@ import {
   UseGuards,
   UploadedFile,
   UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -14,13 +15,11 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
-// ✅ Upload controller - role-based access (Technicians + Admins)
 @Controller('uploads')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UploadsController {
   constructor(private uploadsService: UploadsService) {}
 
-  // Upload work media (before/after photos)
   @Post('work-media/:requestId')
   @Roles('Technician', 'Service Admin', 'Super Admin')
   @UseInterceptors(
@@ -36,24 +35,74 @@ export class UploadsController {
           cb(null, `${randomName}${ext}`);
         },
       }),
-      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+      limits: {
+        fileSize: 10 * 1024 * 1024, // 🆕 Increase to 10MB for mobile images
+      },
       fileFilter: (req, file, cb) => {
-        const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/jpg'];
-        if (allowed.includes(file.mimetype)) {
+        console.log('📱 Incoming file:', {
+          originalname: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size,
+        });
+
+        // 🆕 More permissive MIME types (mobile browsers vary)
+        const allowed = [
+          'image/jpeg',
+          'image/jpg',
+          'image/png',
+          'image/gif',
+          'image/webp', // 🆕 Modern mobile format
+          'image/heic', // 🆕 iPhone format
+          'image/heif', // 🆕 iPhone format
+        ];
+
+        // 🆕 Also check file extension as fallback
+        const ext = extname(file.originalname).toLowerCase();
+        const allowedExts = [
+          '.jpg',
+          '.jpeg',
+          '.png',
+          '.gif',
+          '.webp',
+          '.heic',
+          '.heif',
+        ];
+
+        if (allowed.includes(file.mimetype) || allowedExts.includes(ext)) {
           cb(null, true);
         } else {
-          cb(new Error('Only images (JPEG, PNG, GIF) are allowed!'), false);
+          console.error('❌ Invalid file type:', file.mimetype, ext);
+          cb(
+            new BadRequestException(
+              `Invalid file type: ${file.mimetype}. Only images are allowed.`,
+            ),
+            false,
+          );
         }
       },
     }),
   )
-  uploadWorkMedia(
+  async uploadWorkMedia(
     @Param('requestId') requestId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
+    console.log('📤 Upload request received:', {
+      requestId,
+      hasFile: !!file,
+      file: file
+        ? {
+            originalname: file.originalname,
+            mimetype: file.mimetype,
+            size: file.size,
+            filename: file.filename,
+          }
+        : null,
+    });
+
     if (!file) {
-      throw new Error('No file uploaded');
+      throw new BadRequestException('No file uploaded');
     }
+
     return this.uploadsService.uploadWorkMedia(requestId, file);
   }
 }
