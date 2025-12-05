@@ -18,15 +18,28 @@ async function main() {
         immutable: true,
       },
       {
-        id: 'asdfghjk541fgh',
-        name: 'Tele Caller',
+        id: 'wertyuio56456dfgh',
+        name: 'Service Admin',
         parentRole: 'Super Admin',
         permissions: '{}',
       },
       {
-        id: 'wertyuio56456dfgh',
-        name: 'Service Admin',
-        parentRole: 'Super Admin',
+        id: 'servicemgr12345',
+        name: 'Service Manager',
+        parentRole: 'Service Admin',
+        permissions: '{}',
+      },
+      // 🆕 NEW: Service Team Lead
+      {
+        id: 'servicelead6789',
+        name: 'Service Team Lead',
+        parentRole: 'Service Manager',
+        permissions: '{}',
+      },
+      {
+        id: 'asdfghjk541fgh',
+        name: 'Tele Caller',
+        parentRole: 'Service Admin',
         permissions: '{}',
       },
       {
