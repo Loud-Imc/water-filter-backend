@@ -529,6 +529,7 @@ export class ServiceRequestsService {
       case 'Super Admin':
       case 'Service Admin':
       case 'Service Manager':
+      case 'Tele Caller':
         return {}; // See all
       default:
         return { requestedById: userId };
