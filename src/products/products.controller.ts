@@ -21,7 +21,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('products')
 export class ProductsController {
-  constructor(private productsService: ProductsService) {}
+  constructor(private productsService: ProductsService) { }
 
   @Post()
   @RequirePermissions('products.create')
@@ -124,6 +124,41 @@ export class ProductsController {
       id,
       body.quantityChange,
       body.reason,
+    );
+  }
+
+  // ✅ NEW: Get technician stock for a product
+  @Get(':id/technician-stock')
+  @RequirePermissions('stock.view')
+  getTechnicianStock(@Param('id') id: string) {
+    return this.productsService.getTechnicianStock(id);
+  }
+
+  // ✅ NEW: Transfer product stock to technician
+  @Post(':id/transfer-to-technician')
+  @RequirePermissions('stock.transfer')
+  transferToTechnician(
+    @Param('id') id: string,
+    @Body() body: { technicianId: string; quantity: number },
+  ) {
+    return this.productsService.transferToTechnician(
+      id,
+      body.technicianId,
+      body.quantity,
+    );
+  }
+
+  // ✅ NEW: Return product stock from technician
+  @Post(':id/return-from-technician')
+  @RequirePermissions('stock.transfer')
+  returnFromTechnician(
+    @Param('id') id: string,
+    @Body() body: { technicianId: string; quantity: number },
+  ) {
+    return this.productsService.returnFromTechnician(
+      id,
+      body.technicianId,
+      body.quantity,
     );
   }
 }

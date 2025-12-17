@@ -9,7 +9,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 
 @Injectable()
 export class ProductsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async create(data: CreateProductDto) {
     // Validate warranty input
@@ -311,6 +311,211 @@ export class ProductsService {
       include: {
         category: true, // ✅ NEW
       },
+    });
+  }
+
+  // ✅ NEW: Technician stock management for products
+  async getTechnicianStock(productId: string) {
+    await this.findOne(productId); // Validate product exists
+
+    return this.prisma.technicianStock.findMany({
+      where: {
+        productId,
+        quantity: { gt: 0 }, // Only show technicians with stock
+      },
+      include: {
+        technician: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            region: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        quantity: 'desc',
+      },
+    });
+  }
+
+  async transferToTechnician(
+    productId: string,
+    technicianId: string,
+    quantity: number,
+  ) {
+    if (quantity <= 0) {
+      throw new BadRequestException('Quantity must be positive');
+    }
+
+    const product = await this.findOne(productId);
+
+    // Check warehouse stock
+    if (product.stock < quantity) {
+      throw new BadRequestException(
+        `Insufficient warehouse stock. Available: ${product.stock}, Requested: ${quantity}`,
+      );
+    }
+
+    // Verify technician exists
+    const technician = await this.prisma.user.findUnique({
+      where: { id: technicianId },
+    });
+
+    if (!technician) {
+      throw new NotFoundException('Technician not found');
+    }
+
+    // Execute transfer in transaction
+    return this.prisma.$transaction(async (tx) => {
+      // Reduce warehouse stock
+      await tx.product.update({
+        where: { id: productId },
+        data: {
+          stock: {
+            decrement: quantity,
+          },
+        },
+      });
+
+      // Log warehouse stock history
+      await tx.productStockHistory.create({
+        data: {
+          productId,
+          quantityChange: -quantity,
+          reason: `Transferred to technician: ${technician.name}`,
+        },
+      });
+
+      // Update or create technician stock
+      const existingStock = await tx.technicianStock.findUnique({
+        where: {
+          technicianId_productId: {
+            technicianId,
+            productId,
+          },
+        },
+      });
+
+      if (existingStock) {
+        await tx.technicianStock.update({
+          where: { id: existingStock.id },
+          data: {
+            quantity: {
+              increment: quantity,
+            },
+          },
+        });
+      } else {
+        await tx.technicianStock.create({
+          data: {
+            technicianId,
+            productId,
+            quantity,
+          },
+        });
+      }
+
+      return {
+        success: true,
+        message: `Transferred ${quantity} units to ${technician.name}`,
+        warehouseStock: product.stock - quantity,
+      };
+    });
+  }
+
+  async returnFromTechnician(
+    productId: string,
+    technicianId: string,
+    quantity: number,
+  ) {
+    if (quantity <= 0) {
+      throw new BadRequestException('Quantity must be positive');
+    }
+
+    const product = await this.findOne(productId);
+
+    // Verify technician exists
+    const technician = await this.prisma.user.findUnique({
+      where: { id: technicianId },
+    });
+
+    if (!technician) {
+      throw new NotFoundException('Technician not found');
+    }
+
+    // Check technician has stock
+    const technicianStock = await this.prisma.technicianStock.findUnique({
+      where: {
+        technicianId_productId: {
+          technicianId,
+          productId,
+        },
+      },
+    });
+
+    if (!technicianStock) {
+      throw new BadRequestException(
+        `Technician ${technician.name} has no stock of this product`,
+      );
+    }
+
+    if (technicianStock.quantity < quantity) {
+      throw new BadRequestException(
+        `Insufficient technician stock. Technician has: ${technicianStock.quantity}, Requested return: ${quantity}`,
+      );
+    }
+
+    // Execute return in transaction
+    return this.prisma.$transaction(async (tx) => {
+      // Increase warehouse stock
+      await tx.product.update({
+        where: { id: productId },
+        data: {
+          stock: {
+            increment: quantity,
+          },
+        },
+      });
+
+      // Log warehouse stock history
+      await tx.productStockHistory.create({
+        data: {
+          productId,
+          quantityChange: quantity,
+          reason: `Returned from technician: ${technician.name}`,
+        },
+      });
+
+      // Decrease technician stock
+      const newTechnicianQuantity = technicianStock.quantity - quantity;
+
+      if (newTechnicianQuantity === 0) {
+        // Delete the record if quantity becomes 0
+        await tx.technicianStock.delete({
+          where: { id: technicianStock.id },
+        });
+      } else {
+        // Update the quantity
+        await tx.technicianStock.update({
+          where: { id: technicianStock.id },
+          data: {
+            quantity: newTechnicianQuantity,
+          },
+        });
+      }
+
+      return {
+        success: true,
+        message: `Returned ${quantity} units from ${technician.name}`,
+        warehouseStock: product.stock + quantity,
+        technicianStock: newTechnicianQuantity,
+      };
     });
   }
 }
