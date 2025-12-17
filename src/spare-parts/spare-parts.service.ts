@@ -9,7 +9,7 @@ import { UpdateSparePartDto } from './dto/update-spare-part.dto';
 
 @Injectable()
 export class SparePartsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async create(data: CreateSparePartDto) {
     // Validate warranty input
@@ -421,6 +421,96 @@ export class SparePartsService {
         success: true,
         message: `Transferred ${quantity} units to ${technician.name}`,
         warehouseStock: sparePart.stock - quantity,
+      };
+    });
+  }
+
+  async returnFromTechnician(
+    sparePartId: string,
+    technicianId: string,
+    quantity: number,
+  ) {
+    if (quantity <= 0) {
+      throw new BadRequestException('Quantity must be positive');
+    }
+
+    const sparePart = await this.findOne(sparePartId);
+
+    // Verify technician exists
+    const technician = await this.prisma.user.findUnique({
+      where: { id: technicianId },
+    });
+
+    if (!technician) {
+      throw new NotFoundException('Technician not found');
+    }
+
+    // Check technician has stock
+    const technicianStock = await this.prisma.technicianStock.findUnique({
+      where: {
+        technicianId_sparePartId: {
+          technicianId,
+          sparePartId,
+        },
+      },
+    });
+
+    if (!technicianStock) {
+      throw new BadRequestException(
+        `Technician ${technician.name} has no stock of this spare part`,
+      );
+    }
+
+    if (technicianStock.quantity < quantity) {
+      throw new BadRequestException(
+        `Insufficient technician stock. Technician has: ${technicianStock.quantity}, Requested return: ${quantity}`,
+      );
+    }
+
+    // Execute return in transaction
+    return this.prisma.$transaction(async (tx) => {
+      // Increase warehouse stock
+      await tx.sparePart.update({
+        where: { id: sparePartId },
+        data: {
+          stock: {
+            increment: quantity,
+          },
+        },
+      });
+
+      // Log warehouse stock history
+      await tx.sparePartStockHistory.create({
+        data: {
+          sparePartId,
+          quantityChange: quantity,
+          reason: `Returned from technician: ${technician.name}`,
+        },
+      });
+
+      // Decrease technician stock
+      const newTechnicianQuantity = technicianStock.quantity - quantity;
+
+      if (newTechnicianQuantity === 0) {
+        // Delete the record if quantity becomes 0
+        await tx.technicianStock.delete({
+          where: { id: technicianStock.id },
+        });
+      } else {
+        // Update the quantity
+        await tx.technicianStock.update({
+          where: { id: technicianStock.id },
+          data: {
+            quantity: newTechnicianQuantity,
+          },
+        });
+      }
+
+      return {
+        success: true,
+        message: `Returned ${quantity} units from ${technician.name}`,
+        warehouseStock: sparePart.stock + quantity,
+        technicianStock: newTechnicianQuantity,
       };
     });
   }

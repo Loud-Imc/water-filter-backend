@@ -21,7 +21,7 @@ import { StockUpdateDto } from './dto/stock-update.dto';
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('spare-parts')
 export class SparePartsController {
-  constructor(private sparePartsService: SparePartsService) {}
+  constructor(private sparePartsService: SparePartsService) { }
 
   @Post()
   @RequirePermissions('spare_parts.create')
@@ -34,7 +34,7 @@ export class SparePartsController {
   findAll(@Query('groupId') groupId?: string) {
     return this.sparePartsService.findAll(groupId);
   }
-  
+
 
   @Get('low-stock')
   @RequirePermissions('spare_parts.view')
@@ -115,6 +115,20 @@ export class SparePartsController {
     @Body() body: { technicianId: string; quantity: number },
   ) {
     return this.sparePartsService.transferToTechnician(
+      id,
+      body.technicianId,
+      body.quantity,
+    );
+  }
+
+  // ✅ Return stock from technician
+  @Post(':id/return-from-technician')
+  @RequirePermissions('stock.transfer')
+  returnFromTechnician(
+    @Param('id') id: string,
+    @Body() body: { technicianId: string; quantity: number },
+  ) {
+    return this.sparePartsService.returnFromTechnician(
       id,
       body.technicianId,
       body.quantity,
