@@ -12,6 +12,7 @@ import {
   UploadedFile,
   BadRequestException,
   Request,
+  Delete,
 } from '@nestjs/common';
 import { ServiceRequestsService } from './service-requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -27,7 +28,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('service-requests')
 export class ServiceRequestsController {
-  constructor(private serviceRequestsService: ServiceRequestsService) {}
+  constructor(private serviceRequestsService: ServiceRequestsService) { }
 
   // ✅ UPDATED: Permission-based
   @Post()
@@ -89,6 +90,21 @@ export class ServiceRequestsController {
       id,
       req.user.userId,
       body.comments,
+    );
+  }
+
+  // ✅ NEW: Update description
+  @Patch(':id/description')
+  @RequirePermissions('services.edit')
+  async updateDescription(
+    @Param('id') id: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Body('description') description: string,
+  ) {
+    return this.serviceRequestsService.updateDescription(
+      id,
+      description,
+      req.user.userId,
     );
   }
 
@@ -257,6 +273,36 @@ export class ServiceRequestsController {
   @RequirePermissions('services.view')
   async getUsedProducts(@Param('id') requestId: string) {
     return this.serviceRequestsService.getUsedProducts(requestId);
+  }
+
+  @Patch(':id/used-items/:usedItemId')
+  @RequirePermissions('services.edit')
+  async updateUsedItem(
+    @Param('id') requestId: string,
+    @Param('usedItemId') usedItemId: string,
+    @Req() req,
+    @Body('quantityUsed') quantityUsed: number,
+  ) {
+    return this.serviceRequestsService.updateUsedItem(
+      requestId,
+      req.user.userId,
+      usedItemId,
+      quantityUsed,
+    );
+  }
+
+  @Delete(':id/used-items/:usedItemId')
+  @RequirePermissions('services.edit')
+  async deleteUsedItem(
+    @Param('id') requestId: string,
+    @Param('usedItemId') usedItemId: string,
+    @Req() req,
+  ) {
+    return this.serviceRequestsService.deleteUsedItem(
+      requestId,
+      req.user.userId,
+      usedItemId,
+    );
   }
 
   @Get('dashboard/stats')

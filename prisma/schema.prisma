@@ -507,6 +507,7 @@ model ServiceUsedProduct {
   sparePartId String?
   
   quantityUsed Int
+  source       String   @default("technician") // Either "warehouse" or "technician"
   notes        String?
   
   confirmedBy String

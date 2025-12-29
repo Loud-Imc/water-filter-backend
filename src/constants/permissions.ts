@@ -12,6 +12,7 @@ export const PERMISSION_MODULES = {
   GROUPS: 'groups',
   ASSEMBLY: 'assembly',
   STOCK: 'stock',
+  INSTALLATIONS: 'installations',
 } as const;
 
 export const PERMISSION_ACTIONS = {
@@ -127,7 +128,7 @@ export const ALL_PERMISSIONS: Permission[] = [
     label: 'Assign Technician',
     description: 'Assign technicians to services',
   },
-    {
+  {
     module: PERMISSION_MODULES.SERVICES,
     action: PERMISSION_ACTIONS.IMPORT,
     key: 'services.import',
@@ -359,6 +360,38 @@ export const ALL_PERMISSIONS: Permission[] = [
     label: 'Transfer Stock',
     description: 'Transfer stock to technicians',
   },
+
+  // ==========================================
+  // ✅ NEW: INSTALLATIONS
+  // ==========================================
+  {
+    module: PERMISSION_MODULES.INSTALLATIONS,
+    action: PERMISSION_ACTIONS.VIEW,
+    key: 'installations.view',
+    label: 'View Installations',
+    description: 'View installation list and details',
+  },
+  {
+    module: PERMISSION_MODULES.INSTALLATIONS,
+    action: PERMISSION_ACTIONS.CREATE,
+    key: 'installations.create',
+    label: 'Create Installations',
+    description: 'Add new installations',
+  },
+  {
+    module: PERMISSION_MODULES.INSTALLATIONS,
+    action: PERMISSION_ACTIONS.EDIT,
+    key: 'installations.edit',
+    label: 'Edit Installations',
+    description: 'Modify installation information',
+  },
+  {
+    module: PERMISSION_MODULES.INSTALLATIONS,
+    action: PERMISSION_ACTIONS.DELETE,
+    key: 'installations.delete',
+    label: 'Delete Installations',
+    description: 'Remove installations from system',
+  },
 ];
 
 // ==========================================
@@ -418,6 +451,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'stock.view',
     'stock.update',
     'stock.transfer',
+    // Installations
+    'installations.view',
+    'installations.create',
+    'installations.edit',
+    'installations.delete',
   ],
 
   'Service Admin': [
@@ -435,6 +473,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'products.view',
     'spare_parts.view',
     'stock.view',
+    // Installations
+    'installations.view',
+    'installations.create',
+    'installations.edit',
   ],
 
   'Service Team Lead': [
@@ -450,6 +492,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'products.view',
     'spare_parts.view',
     'stock.view',
+    // Installations
+    'installations.view',
+    'installations.edit',
   ],
 
   Technician: [
@@ -462,6 +507,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'products.view',
     'spare_parts.view',
     'stock.view',
+    // Installations
+    'installations.view',
+    'installations.edit',
   ],
 
   'Sales Admin': [
@@ -475,6 +523,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     // ✅ NEW: Product viewing for sales quotes
     'products.view',
     'categories.view',
+    // Installations
+    'installations.view',
+    'installations.create',
+    'installations.edit',
   ],
 
   // ✅ NEW: Inventory Manager Role
@@ -517,6 +569,12 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'services.view',
     'services.create',
     'reports.view',
+    'customers.view',
+    'customers.create',
+    'customers.edit',
+    'installations.view',
+    'installations.create',
+    'installations.edit',
   ],
 };
 
