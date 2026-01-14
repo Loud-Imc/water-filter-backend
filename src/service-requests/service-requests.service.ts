@@ -598,16 +598,16 @@ export class ServiceRequestsService {
       );
     }
 
-    if (
-      ![
-        'Super Admin',
-        'Service Admin',
-        'Service Manager',
-        'Service Team Lead',
-      ].includes(reassigner.role.name)
-    ) {
-      throw new ForbiddenException('Insufficient permissions');
-    }
+    // if (
+    //   ![
+    //     'Super Admin',
+    //     'Service Admin',
+    //     'Service Manager',
+    //     'Service Team Lead',
+    //   ].includes(reassigner.role.name)
+    // ) {
+    //   throw new ForbiddenException('Insufficient permissions');
+    // }
 
     const newTechnician = await this.prisma.user.findUnique({
       where: { id: newTechnicianId },
