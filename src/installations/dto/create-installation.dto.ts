@@ -62,4 +62,10 @@ export class CreateInstallationDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsOptional()
+  lastSpunChangeAt?: Date;
+
+  @IsOptional()
+  nextSpunChangeAt?: Date;
 }

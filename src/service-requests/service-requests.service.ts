@@ -62,19 +62,36 @@ export class ServiceRequestsService {
     limit: number = 10,
     status?: string,
     userId?: string,
+    search?: string,
+    searchBy: string = "general"
   ) {
     const skip = (page - 1) * limit;
 
     const where: any = {};
 
     // Filter by status if provided
-    if (status && status !== 'ALL') {
+    if (status && status !== "ALL") {
       where.status = status;
     }
 
     // Filter by assigned technician if userId provided
     if (userId) {
       where.assignedToId = userId;
+    }
+
+    // 🔍 Search functionality
+    if (search) {
+      if (searchBy === "technician") {
+        where.assignedTo = {
+          name: { contains: search, mode: "insensitive" },
+        };
+      } else {
+        where.OR = [
+          { customer: { name: { contains: search, mode: "insensitive" } } },
+          { description: { contains: search, mode: "insensitive" } },
+          { id: { contains: search, mode: "insensitive" } },
+        ];
+      }
     }
 
     const [requests, total] = await Promise.all([
@@ -87,6 +104,10 @@ export class ServiceRequestsService {
           customer: true,
           region: true,
           approvalHistory: { include: { approver: true } },
+          workLogs: {
+            orderBy: { endTime: 'desc' },
+            take: 1,
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip,

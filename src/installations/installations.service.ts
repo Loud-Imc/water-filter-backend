@@ -295,4 +295,78 @@ export class InstallationsService {
       statistics: stats,
     };
   }
+
+  async updateMaintenanceInfo(id: string, daysNextChange: number = 90, minutesNextChange?: number) {
+    const lastSpunChangeAt = new Date();
+    const nextSpunChangeAt = new Date();
+    
+    // Explicitly convert to Number to avoid string concatenation issues
+    const mins = minutesNextChange !== undefined ? Number(minutesNextChange) : undefined;
+    const days = daysNextChange !== undefined ? Number(daysNextChange) : 90;
+
+    if (mins !== undefined && !isNaN(mins)) {
+      nextSpunChangeAt.setMinutes(lastSpunChangeAt.getMinutes() + mins);
+      console.log(`Setting maintenance for ${id} in ${mins} minutes: ${nextSpunChangeAt}`);
+    } else {
+      nextSpunChangeAt.setDate(lastSpunChangeAt.getDate() + (days || 90));
+      console.log(`Setting maintenance for ${id} in ${days} days: ${nextSpunChangeAt}`);
+    }
+
+    return this.prisma.installation.update({
+      where: { id },
+      data: {
+        lastSpunChangeAt,
+        nextSpunChangeAt,
+      },
+      include: {
+        customer: true,
+        region: true,
+      },
+    });
+  }
+
+  async getUpcomingMaintenance(days: number = 7) {
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() + days);
+
+    return this.prisma.installation.findMany({
+      where: {
+        isActive: true,
+        nextSpunChangeAt: {
+          lte: thresholdDate,
+        },
+      },
+      include: {
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            primaryPhone: true,
+          },
+        },
+        region: true,
+      },
+      orderBy: {
+        nextSpunChangeAt: 'asc',
+      },
+    });
+  }
+
+  async getMaintenanceSchedule() {
+    return this.prisma.installation.findMany({
+      where: {
+        isActive: true,
+        nextSpunChangeAt: {
+          not: null,
+        },
+      },
+      include: {
+        customer: true,
+        region: true,
+      },
+      orderBy: {
+        nextSpunChangeAt: 'asc',
+      },
+    });
+  }
 }

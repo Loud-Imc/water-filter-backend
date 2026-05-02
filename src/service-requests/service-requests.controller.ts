@@ -46,12 +46,16 @@ export class ServiceRequestsController {
     @Query('limit') limit?: string,
     @Query('status') status?: string,
     @Query('userId') userId?: string, // For technician filtering
+    @Query('search') search?: string,
+    @Query('searchBy') searchBy?: string,
   ) {
     return this.serviceRequestsService.findAll(
       page ? parseInt(page) : 1,
       limit ? parseInt(limit) : 10,
       status,
       userId,
+      search,
+      searchBy,
     );
   }
 

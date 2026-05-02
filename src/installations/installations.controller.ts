@@ -30,6 +30,21 @@ export class InstallationsController {
     return this.installationsService.findAll(activeFilter);
   }
 
+  // ✅ Maintenance Alerts - Must be ABOVE :id route
+  @Get('maintenance-schedule')
+  @RequirePermissions('installations.view')
+  getMaintenanceSchedule() {
+    return this.installationsService.getMaintenanceSchedule();
+  }
+
+  @Get('maintenance-alerts')
+  @RequirePermissions('installations.view')
+  getUpcomingMaintenance(@Query('days') days?: string) {
+    return this.installationsService.getUpcomingMaintenance(
+      days ? parseInt(days) : 7,
+    );
+  }
+
   // Search installations
   @Get('search')
   @RequirePermissions('installations.view')
@@ -108,5 +123,15 @@ export class InstallationsController {
   @RequirePermissions('installations.edit')
   setPrimary(@Param('id') id: string) {
     return this.installationsService.setPrimary(id);
+  }
+
+  @Put(':id/maintenance')
+  @RequirePermissions('installations.edit')
+  updateSpunChange(
+    @Param('id') id: string,
+    @Body('daysNextChange') daysNextChange?: number,
+    @Body('minutesNextChange') minutesNextChange?: number,
+  ) {
+    return this.installationsService.updateMaintenanceInfo(id, daysNextChange, minutesNextChange);
   }
 }
