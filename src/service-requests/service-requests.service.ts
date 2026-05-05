@@ -63,7 +63,9 @@ export class ServiceRequestsService {
     status?: string,
     userId?: string,
     search?: string,
-    searchBy: string = "general"
+    searchBy: string = "general",
+    sortBy?: string,
+    sortOrder: 'asc' | 'desc' = 'desc'
   ) {
     const skip = (page - 1) * limit;
 
@@ -94,9 +96,63 @@ export class ServiceRequestsService {
       }
     }
 
-    const [requests, total] = await Promise.all([
-      this.prisma.serviceRequest.findMany({
-        where,
+    // 📈 Sorting logic
+    let requests: any[];
+    let total: number;
+
+    if (sortBy === 'workCompletedAt') {
+      // Custom query for sorting by latest work log end time
+      const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
+      const nullsDir = sortOrder === 'asc' ? 'NULLS FIRST' : 'NULLS LAST';
+
+      // Construct raw query to get ordered IDs
+      // We still need to respect filters
+      let filterSql = 'WHERE 1=1';
+      const params: any[] = [];
+
+      if (status && status !== 'ALL') {
+        filterSql += ` AND sr.status = $${params.length + 1}`;
+        params.push(status);
+      }
+      if (userId) {
+        filterSql += ` AND sr."assignedToId" = $${params.length + 1}`;
+        params.push(userId);
+      }
+      if (search) {
+        if (searchBy === 'technician') {
+          // This requires a join with User table for assignedTo
+          filterSql += ` AND EXISTS (SELECT 1 FROM "User" u WHERE u.id = sr."assignedToId" AND u.name ILIKE $${params.length + 1})`;
+          params.push(`%${search}%`);
+        } else {
+          filterSql += ` AND (sr.description ILIKE $${params.length + 1} OR sr.id::text ILIKE $${params.length + 1} OR EXISTS (SELECT 1 FROM "Customer" c WHERE c.id = sr."customerId" AND c.name ILIKE $${params.length + 1}))`;
+          params.push(`%${search}%`);
+        }
+      }
+
+      const totalResult: any[] = await this.prisma.$queryRawUnsafe(
+        `SELECT COUNT(*) as count FROM "ServiceRequest" sr ${filterSql}`,
+        ...params
+      );
+      total = Number(totalResult[0].count);
+
+      const idResults: any[] = await this.prisma.$queryRawUnsafe(
+        `SELECT sr.id FROM "ServiceRequest" sr
+         LEFT JOIN (
+           SELECT "requestId", MAX("endTime") as max_end
+           FROM "WorkLog"
+           GROUP BY "requestId"
+         ) wl ON sr.id = wl."requestId"
+         ${filterSql}
+         ORDER BY wl.max_end ${orderDir} ${nullsDir}, sr."createdAt" DESC
+         LIMIT ${limit} OFFSET ${skip}`,
+        ...params
+      );
+
+      const ids = idResults.map(r => r.id);
+      
+      // Fetch full details for these IDs and maintain order
+      const fetchedRequests = await this.prisma.serviceRequest.findMany({
+        where: { id: { in: ids } },
         include: {
           requestedBy: { include: { role: true } },
           approvedBy: true,
@@ -108,13 +164,43 @@ export class ServiceRequestsService {
             orderBy: { endTime: 'desc' },
             take: 1,
           },
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.serviceRequest.count({ where }),
-    ]);
+        }
+      });
+
+      // Sort fetched requests to match the order of IDs
+      requests = ids.map(id => fetchedRequests.find(r => r.id === id)).filter(Boolean);
+
+    } else {
+      // Standard Prisma sorting for createdAt or other direct fields
+      const orderBy: any = {};
+      if (sortBy === 'createdAt') {
+        orderBy.createdAt = sortOrder;
+      } else {
+        orderBy.createdAt = 'desc'; // Default
+      }
+
+      [requests, total] = await Promise.all([
+        this.prisma.serviceRequest.findMany({
+          where,
+          include: {
+            requestedBy: { include: { role: true } },
+            approvedBy: true,
+            assignedTo: true,
+            customer: true,
+            region: true,
+            approvalHistory: { include: { approver: true } },
+            workLogs: {
+              orderBy: { endTime: 'desc' },
+              take: 1,
+            },
+          },
+          orderBy,
+          skip,
+          take: limit,
+        }),
+        this.prisma.serviceRequest.count({ where }),
+      ]);
+    }
 
     return {
       data: requests,

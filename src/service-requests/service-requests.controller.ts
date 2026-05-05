@@ -48,6 +48,8 @@ export class ServiceRequestsController {
     @Query('userId') userId?: string, // For technician filtering
     @Query('search') search?: string,
     @Query('searchBy') searchBy?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
   ) {
     return this.serviceRequestsService.findAll(
       page ? parseInt(page) : 1,
@@ -56,6 +58,8 @@ export class ServiceRequestsController {
       userId,
       search,
       searchBy,
+      sortBy,
+      sortOrder,
     );
   }
 
