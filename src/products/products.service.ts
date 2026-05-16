@@ -392,6 +392,17 @@ export class ProductsService {
         },
       });
 
+      // ✅ Log technician stock transaction
+      await tx.technicianStockTransaction.create({
+        data: {
+          technicianId,
+          productId,
+          quantity,
+          type: 'ISSUE',
+          notes: `Received ${quantity} units from warehouse`,
+        },
+      });
+
       // Update or create technician stock
       const existingStock = await tx.technicianStock.findUnique({
         where: {
@@ -489,6 +500,17 @@ export class ProductsService {
           productId,
           quantityChange: quantity,
           reason: `Returned from technician: ${technician.name}`,
+        },
+      });
+
+      // ✅ Log technician stock transaction
+      await tx.technicianStockTransaction.create({
+        data: {
+          technicianId,
+          productId,
+          quantity: -quantity,
+          type: 'RETURN',
+          notes: `Returned ${quantity} units to warehouse`,
         },
       });
 

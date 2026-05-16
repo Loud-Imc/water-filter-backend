@@ -47,6 +47,34 @@ export class TechniciansController {
     return this.techniciansService.getTechnicianStock(req.user.userId);
   }
 
+  // Get technician's own stock history
+  @Get('my-stock-history')
+  @Roles('Technician')
+  getMyStockHistory(@Req() req) {
+    return this.techniciansService.getTechnicianStockHistory(req.user.userId);
+  }
+
+  // Get specific technician's stock history (admin only)
+  @Get('stock-transactions')
+  @RequirePermissions('stock.view')
+  getAllStockTransactions() {
+    return this.techniciansService.getAllStockTransactions();
+  }
+
+  // Get current stock levels for all technicians (admin only)
+  @Get('all-stocks')
+  @RequirePermissions('stock.view')
+  getAllTechnicianStocks() {
+    return this.techniciansService.getAllTechnicianStocks();
+  }
+
+  // Get specific technician's stock history (admin only)
+  @Get(':technicianId/stock-history')
+  @RequirePermissions('stock.view')
+  getTechnicianStockHistory(@Param('technicianId') technicianId: string) {
+    return this.techniciansService.getTechnicianStockHistory(technicianId);
+  }
+
   // Get specific technician's stock (admin only)
   @Get(':technicianId')
   @RequirePermissions('technician-stock.view')

@@ -224,4 +224,155 @@ export class CustomersService {
       byRegion,
     };
   }
+
+  // ============================================
+  // CUSTOMER MERGE LOGIC
+  // ============================================
+
+  async createMergeRequest(
+    userId: string,
+    sourceId: string,
+    targetId: string,
+    reason?: string,
+  ) {
+    if (sourceId === targetId) {
+      throw new BadRequestException('Cannot merge a customer into themselves');
+    }
+
+    // Verify both customers exist
+    const [source, target] = await Promise.all([
+      this.prisma.customer.findUnique({ where: { id: sourceId } }),
+      this.prisma.customer.findUnique({ where: { id: targetId } }),
+    ]);
+
+    if (!source || !target) {
+      throw new NotFoundException('One or both customers not found');
+    }
+
+    // Check if a pending request already exists
+    const existing = await this.prisma.customerMergeRequest.findFirst({
+      where: {
+        sourceId,
+        targetId,
+        status: 'PENDING',
+      },
+    });
+
+    if (existing) {
+      throw new BadRequestException('A merge request for these customers is already pending');
+    }
+
+    return this.prisma.customerMergeRequest.create({
+      data: {
+        source: { connect: { id: sourceId } },
+        target: { connect: { id: targetId } },
+        requestedBy: { connect: { id: userId } },
+        reason,
+      },
+      include: {
+        source: true,
+        target: true,
+        requestedBy: {
+          select: { name: true, email: true },
+        },
+      },
+    });
+  }
+
+  async getMergeRequests(status?: string) {
+    return this.prisma.customerMergeRequest.findMany({
+      where: status ? { status } : {},
+      include: {
+        source: true,
+        target: true,
+        requestedBy: {
+          select: { name: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async processMergeRequest(
+    requestId: string,
+    status: 'APPROVED' | 'REJECTED',
+    adminNotes?: string,
+  ) {
+    const request = await this.prisma.customerMergeRequest.findUnique({
+      where: { id: requestId },
+      include: { source: true, target: true },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Merge request not found');
+    }
+
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException(`Request already ${request.status.toLowerCase()}`);
+    }
+
+    if (status === 'REJECTED') {
+      return this.prisma.customerMergeRequest.update({
+        where: { id: requestId },
+        data: {
+          status: 'REJECTED',
+          adminNotes,
+          processedAt: new Date(),
+        },
+      });
+    }
+
+    // EXECUTE MERGE
+    return this.prisma.$transaction(async (tx) => {
+      const { sourceId, targetId } = request;
+
+      // 1. Move all installations
+      await tx.installation.updateMany({
+        where: { customerId: sourceId },
+        data: { customerId: targetId },
+      });
+
+      // 2. Move all service requests
+      await tx.serviceRequest.updateMany({
+        where: { customerId: sourceId },
+        data: { customerId: targetId },
+      });
+
+      // 3. Consolidate phone numbers
+      const combinedPhones = Array.from(new Set([
+        ...request.target.phoneNumbers,
+        request.source.primaryPhone,
+        ...request.source.phoneNumbers
+      ])).filter(p => p !== request.target.primaryPhone);
+
+      await tx.customer.update({
+        where: { id: targetId },
+        data: {
+          phoneNumbers: combinedPhones,
+        },
+      });
+
+      // 4. Mark source as merged
+      await tx.customer.update({
+        where: { id: sourceId },
+        data: {
+          isMerged: true,
+          mergedToId: targetId,
+          // Clear unique fields to avoid conflicts in future imports
+          primaryPhone: `MERGED_${sourceId}_${request.source.primaryPhone}`,
+          email: request.source.email ? `MERGED_${sourceId}_${request.source.email}` : null,
+        },
+      });
+
+      // 5. Update request status
+      return tx.customerMergeRequest.update({
+        where: { id: requestId },
+        data: {
+          status: 'APPROVED',
+          adminNotes,
+          processedAt: new Date(),
+        },
+      });
+    });
+  }
 }

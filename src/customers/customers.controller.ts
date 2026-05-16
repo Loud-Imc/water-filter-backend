@@ -8,6 +8,7 @@ import {
   Body,
   UseGuards,
   Query,
+  Request,
 } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
@@ -16,7 +17,8 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
-import { UpdateLocationDto } from './dto/update-location.dto';
+ import { UpdateLocationDto } from './dto/update-location.dto';
+import { CreateMergeRequestDto, ProcessMergeRequestDto } from './dto/merge-customer.dto';
 
 // ✅ UPDATED: Added PermissionsGuard
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
@@ -109,5 +111,39 @@ export class CustomersController {
   @RequirePermissions('customers.delete')
   remove(@Param('id') id: string) {
     return this.customersService.remove(id);
+  }
+
+  // ============================================
+  // CUSTOMER MERGE ENDPOINTS
+  // ============================================
+
+  @Post('merge-request')
+  @RequirePermissions('customers.edit')
+  createMergeRequest(@Request() req, @Body() body: CreateMergeRequestDto) {
+    return this.customersService.createMergeRequest(
+      req.user.userId,
+      body.sourceId,
+      body.targetId,
+      body.reason,
+    );
+  }
+
+  @Get('merge-requests/list')
+  @RequirePermissions('customers.edit')
+  getMergeRequests(@Query('status') status?: string) {
+    return this.customersService.getMergeRequests(status);
+  }
+
+  @Post('merge-requests/:id/process')
+  @RequirePermissions('customers.delete')
+  processMergeRequest(
+    @Param('id') id: string,
+    @Body() body: ProcessMergeRequestDto,
+  ) {
+    return this.customersService.processMergeRequest(
+      id,
+      body.status,
+      body.adminNotes,
+    );
   }
 }

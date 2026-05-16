@@ -33,8 +33,9 @@ export class InstallationsController {
   // ✅ Maintenance Alerts - Must be ABOVE :id route
   @Get('maintenance-schedule')
   @RequirePermissions('installations.view')
-  getMaintenanceSchedule() {
-    return this.installationsService.getMaintenanceSchedule();
+  getMaintenanceSchedule(@Query('days') days?: string) {
+    const daysNum = days && days !== 'all' ? parseInt(days) : undefined;
+    return this.installationsService.getMaintenanceSchedule(daysNum);
   }
 
   @Get('maintenance-alerts')

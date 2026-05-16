@@ -1400,6 +1400,17 @@ export class ServiceRequestsService {
         where: { id: techStock.id },
         data: { quantity: { decrement: diff } },
       });
+
+      // ✅ Log technician stock transaction
+      await this.prisma.technicianStockTransaction.create({
+        data: {
+          technicianId: usedItem.confirmedBy,
+          [isProduct ? 'productId' : 'sparePartId']: itemId,
+          quantity: -diff,
+          type: 'CONSUMPTION',
+          notes: `Updated usage in Service Request #${requestId}`,
+        },
+      });
     }
 
     return this.prisma.serviceUsedProduct.update({
@@ -1470,6 +1481,17 @@ export class ServiceRequestsService {
         await this.prisma.technicianStock.update({
           where: { id: techStock.id },
           data: { quantity: { increment: qtyToRestore } },
+        });
+
+        // ✅ Log technician stock transaction (Restoration)
+        await this.prisma.technicianStockTransaction.create({
+          data: {
+            technicianId: usedItem.confirmedBy,
+            [isProduct ? 'productId' : 'sparePartId']: isProduct ? usedItem.productId : usedItem.sparePartId,
+            quantity: qtyToRestore,
+            type: 'ISSUE', // Restoration is like an issue back to tech stock
+            notes: `Deleted usage in Service Request #${requestId}`,
+          },
         });
       }
     }
@@ -1998,6 +2020,28 @@ export class ServiceRequestsService {
             workLogs.length
             : 0;
 
+        // Calculate average response time (Assigned -> In Progress)
+        const reassignments = await this.prisma.reassignmentHistory.count({
+          where: { newTechId: tech.id, createdAt: { gte: startDate, lte: endDate } }
+        });
+
+        // Used items value
+        const usedItems = await this.prisma.serviceUsedProduct.findMany({
+          where: {
+            confirmedBy: tech.id,
+            confirmedAt: { gte: startDate, lte: endDate },
+          },
+          include: {
+            product: { select: { price: true } },
+            sparePart: { select: { price: true } },
+          },
+        });
+
+        const totalUsedValue = usedItems.reduce((sum, item) => {
+          const price = item.product?.price || item.sparePart?.price || 0;
+          return sum + (price * item.quantityUsed);
+        }, 0);
+
         return {
           technicianId: tech.id,
           name: tech.name,
@@ -2006,6 +2050,8 @@ export class ServiceRequestsService {
           assigned,
           completed,
           inProgress,
+          reassignments,
+          totalUsedValue: totalUsedValue.toFixed(2),
           completionRate:
             assigned > 0 ? ((completed / assigned) * 100).toFixed(1) : '0',
           avgWorkDurationHours: (avgDuration / 60).toFixed(1), // Convert minutes to hours

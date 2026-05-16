@@ -99,4 +99,45 @@ export class TechniciansService {
       },
     });
   }
+
+  async getTechnicianStockHistory(technicianId: string) {
+    return this.prisma.technicianStockTransaction.findMany({
+      where: { technicianId },
+      include: {
+        product: true,
+        sparePart: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getAllStockTransactions() {
+    return this.prisma.technicianStockTransaction.findMany({
+      include: {
+        technician: {
+          select: { name: true, email: true }
+        },
+        product: true,
+        sparePart: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getAllTechnicianStocks() {
+    return this.prisma.user.findMany({
+      where: { role: { name: 'Technician' } },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        technicianStock: {
+          include: {
+            product: true,
+            sparePart: true
+          }
+        }
+      }
+    });
+  }
 }

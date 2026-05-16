@@ -352,14 +352,22 @@ export class InstallationsService {
     });
   }
 
-  async getMaintenanceSchedule() {
-    return this.prisma.installation.findMany({
-      where: {
-        isActive: true,
-        nextSpunChangeAt: {
-          not: null,
-        },
+  async getMaintenanceSchedule(days?: number) {
+    const where: any = {
+      isActive: true,
+      nextSpunChangeAt: {
+        not: null,
       },
+    };
+
+    if (days !== undefined && !isNaN(days)) {
+      const thresholdDate = new Date();
+      thresholdDate.setDate(thresholdDate.getDate() + days);
+      where.nextSpunChangeAt.lte = thresholdDate;
+    }
+
+    return this.prisma.installation.findMany({
+      where,
       include: {
         customer: true,
         region: true,

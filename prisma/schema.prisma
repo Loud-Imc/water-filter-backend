@@ -112,7 +112,9 @@ model User {
   approvalHistory        ApprovalHistory[]
   notificationsSent      Notification[] @relation("NotificationSender")
   notificationsReceived  Notification[] @relation("NotificationReceiver")
-  technicianStock        TechnicianStock[] // ✅ NEW
+  technicianStock        TechnicianStock[] 
+  stockTransactions      TechnicianStockTransaction[]
+  mergeRequestsRequested CustomerMergeRequest[]
 }
 
 model Customer {
@@ -130,8 +132,17 @@ model Customer {
   updatedAt     DateTime @updatedAt
 
   region        Region           @relation(fields: [regionId], references: [id])
-  installations Installation[]
-  requests      ServiceRequest[]
+  installations   Installation[]
+  requests        ServiceRequest[]
+  
+  // Merge relations
+  isMerged        Boolean @default(false)
+  mergedToId      String?
+  mergedTo        Customer? @relation("MergeHistory", fields: [mergedToId], references: [id])
+  mergedFrom      Customer[] @relation("MergeHistory")
+  
+  asSourceMergeRequests CustomerMergeRequest[] @relation("SourceCustomer")
+  asTargetMergeRequests CustomerMergeRequest[] @relation("TargetCustomer")
 
   @@index([regionId])
   @@index([primaryPhone])
@@ -332,7 +343,8 @@ model SparePart {
   bomItems          BOMTemplateItem[]
   assemblyUsage     AssemblyUsedPart[]
   usedInServices    ServiceUsedProduct[]
-  technicianStock   TechnicianStock[] // ✅ NEW
+  technicianStock   TechnicianStock[] 
+  stockTransactions TechnicianStockTransaction[]
 
   @@index([name])
   @@index([sku])
@@ -364,7 +376,8 @@ model Product {
   bomTemplate     BOMTemplate?
   assemblies      AssemblyHistory[]
   usedInServices  ServiceUsedProduct[]
-  technicianStock TechnicianStock[] // ✅ NEW
+  technicianStock TechnicianStock[] 
+  stockTransactions TechnicianStockTransaction[]
 
   @@index([name])
   @@index([sku])
@@ -523,6 +536,53 @@ model ServiceUsedProduct {
   @@index([requestId])
   @@index([productId])
   @@index([sparePartId])
+}
+
+// ============================================
+// TECHNICIAN STOCK TRANSACTIONS
+// ============================================
+model TechnicianStockTransaction {
+  id             String   @id @default(uuid())
+  technicianId   String
+  sparePartId    String?
+  productId      String?
+  quantity       Int      // Positive for "issued", negative for "returned"
+  type           String   // "ISSUE", "RETURN", "CONSUMPTION"
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  technician User       @relation(fields: [technicianId], references: [id])
+  sparePart  SparePart? @relation(fields: [sparePartId], references: [id])
+  product    Product?   @relation(fields: [productId], references: [id])
+
+  @@index([technicianId])
+  @@index([sparePartId])
+  @@index([productId])
+  @@index([createdAt])
+}
+
+// ============================================
+// CUSTOMER MERGE REQUESTS
+// ============================================
+model CustomerMergeRequest {
+  id             String   @id @default(uuid())
+  sourceId       String
+  targetId       String
+  requestedById  String
+  status         String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  reason         String?
+  adminNotes     String?
+  processedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  source      Customer @relation("SourceCustomer", fields: [sourceId], references: [id])
+  target      Customer @relation("TargetCustomer", fields: [targetId], references: [id])
+  requestedBy User     @relation(fields: [requestedById], references: [id])
+
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([status])
 }
 
 // ============================================
