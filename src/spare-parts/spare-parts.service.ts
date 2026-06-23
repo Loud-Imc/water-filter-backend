@@ -37,11 +37,24 @@ export class SparePartsService {
         );
       }
     }
+
+    // Validate supplier exists if provided
+    if (data.supplierId) {
+      const supplier = await this.prisma.supplier.findUnique({
+        where: { id: data.supplierId },
+      });
+
+      if (!supplier) {
+        throw new NotFoundException('Supplier not found');
+      }
+    }
+
     console.log('data :', data);
     return this.prisma.sparePart.create({
       data,
       include: {
         group: true,
+        supplier: true,
       },
     });
   }
@@ -54,6 +67,7 @@ export class SparePartsService {
       orderBy: { name: 'asc' },
       include: {
         group: true,
+        supplier: true,
         _count: {
           select: {
             stockHistory: true,
@@ -69,6 +83,7 @@ export class SparePartsService {
       where: { id },
       include: {
         group: true,
+        supplier: true,
         stockHistory: {
           orderBy: { createdAt: 'desc' },
           take: 10, // Last 10 stock changes
@@ -109,6 +124,7 @@ export class SparePartsService {
       orderBy: { name: 'asc' },
       include: {
         group: true,
+        supplier: true,
       },
     });
   }
@@ -133,6 +149,17 @@ export class SparePartsService {
       }
     }
 
+    // Validate supplier if being updated
+    if (data.supplierId) {
+      const supplier = await this.prisma.supplier.findUnique({
+        where: { id: data.supplierId },
+      });
+
+      if (!supplier) {
+        throw new NotFoundException('Supplier not found');
+      }
+    }
+
     if (data.hasWarranty === false) {
       // Clear warranty fields if warranty is disabled
       return this.prisma.sparePart.update({
@@ -144,6 +171,7 @@ export class SparePartsService {
         },
         include: {
           group: true,
+          supplier: true,
         },
       });
     }
@@ -153,6 +181,7 @@ export class SparePartsService {
       data,
       include: {
         group: true,
+        supplier: true,
       },
     });
   }
@@ -306,6 +335,7 @@ export class SparePartsService {
       },
       include: {
         group: true,
+        supplier: true,
       },
     });
   }

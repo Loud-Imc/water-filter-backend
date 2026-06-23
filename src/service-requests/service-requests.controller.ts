@@ -17,6 +17,7 @@ import {
 import { ServiceRequestsService } from './service-requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
+import { RecordFreelancerWorkDto } from './dto/record-freelancer-work.dto';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
@@ -158,6 +159,21 @@ export class ServiceRequestsController {
       id,
       req.user.userId,
       comments,
+    );
+  }
+
+  // ✅ ADDED: Admin facility for freelancer work
+  @Post(':id/record-freelancer-work')
+  @RequirePermissions('services.edit')
+  async recordFreelancerWork(
+    @Param('id') id: string,
+    @Req() req,
+    @Body() dto: RecordFreelancerWorkDto,
+  ) {
+    return this.serviceRequestsService.recordFreelancerWork(
+      id,
+      req.user.userId,
+      dto,
     );
   }
 

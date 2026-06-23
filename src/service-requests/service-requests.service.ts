@@ -232,6 +232,7 @@ export class ServiceRequestsService {
           orderBy: { approvedAt: 'asc' },
         },
         category: true,
+        invoices: true,
       },
     });
     if (!request) throw new NotFoundException('Service request not found');
@@ -448,9 +449,9 @@ export class ServiceRequestsService {
   // Manual assignment
   async manualAssignTechnician(id: string, technicianId: string) {
     const request = await this.findOne(id);
-    if (request.status !== 'APPROVED') {
+    if (request.status !== 'APPROVED' && request.status !== 'UNASSIGNED') {
       throw new ForbiddenException(
-        'Request must be approved before assignment',
+        'Request must be approved or unassigned before assignment',
       );
     }
 
@@ -1309,6 +1310,80 @@ export class ServiceRequestsService {
     }
 
     return addedItems;
+  }
+
+  // ✅ ADDED: Admin facility for freelancer work
+  async recordFreelancerWork(
+    requestId: string,
+    adminId: string,
+    dto: any, // We can type this with RecordFreelancerWorkDto
+  ) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      include: { assignedTo: true },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    if (request.status !== 'ASSIGNED' && request.status !== 'RE_ASSIGNED') {
+      throw new BadRequestException('Request must be ASSIGNED or RE_ASSIGNED to record work');
+    }
+
+    // 1. Create the WorkLog
+    const startTime = new Date(dto.startTime);
+    const endTime = new Date(dto.endTime);
+    const duration = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+
+    await this.prisma.workLog.create({
+      data: {
+        requestId,
+        technicianId: request.assignedToId!,
+        startTime,
+        endTime,
+        duration,
+        notes: dto.notes,
+      },
+    });
+
+    // 2. Process Used Items (if any)
+    if (dto.usedItems && dto.usedItems.length > 0) {
+      const standardItems: any[] = [];
+      for (const item of dto.usedItems) {
+        if (item.source === 'external') {
+          // Direct insertion for external items without stock deduction
+          await this.prisma.serviceUsedProduct.create({
+            data: {
+              requestId,
+              quantityUsed: item.quantityUsed,
+              source: 'external',
+              notes: item.notes,
+              confirmedBy: adminId,
+              isExternal: true,
+              externalName: item.externalName,
+              externalPrice: item.externalPrice,
+              externalWarrantyMonths: item.externalWarrantyMonths ? Number(item.externalWarrantyMonths) : null,
+            },
+          });
+        } else {
+          standardItems.push(item);
+        }
+      }
+
+      // Delegate warehouse/technician items to existing logic
+      if (standardItems.length > 0) {
+        await this.addUsedItems(requestId, adminId, standardItems);
+      }
+    }
+
+    // 3. Mark as WORK_COMPLETED
+    const updatedRequest = await this.prisma.serviceRequest.update({
+      where: { id: requestId },
+      data: { status: 'WORK_COMPLETED' },
+    });
+
+    return updatedRequest;
   }
 
   async updateUsedItem(
@@ -2339,19 +2414,21 @@ export class ServiceRequestsService {
   // ✅ UPDATE: Create method to handle new workflow
   async create(dto: CreateServiceRequestDto, userId: string) {
     console.log('create service dto :', dto);
-    // Validate that assigned technician exists and is active
-    const technician = await this.prisma.user.findFirst({
-      where: {
-        id: dto.assignedToId,
-        role: { name: 'Technician' },
-        status: 'ACTIVE',
-      },
-    });
+    let technician: any = null;
+    if (dto.assignedToId) {
+      technician = await this.prisma.user.findFirst({
+        where: {
+          id: dto.assignedToId,
+          role: { name: 'Technician' },
+          status: 'ACTIVE',
+        },
+      });
 
-    if (!technician) {
-      throw new NotFoundException(
-        'Invalid technician or technician is not active',
-      );
+      if (!technician) {
+        throw new NotFoundException(
+          'Invalid technician or technician is not active',
+        );
+      }
     }
 
     if (dto.categoryId === '') {
@@ -2370,9 +2447,9 @@ export class ServiceRequestsService {
         requestedById: userId,
         categoryId: dto.categoryId,
         installationId: dto.installationId,
-        assignedToId: dto.assignedToId, // ✅ Assign directly
-        priority: dto.priority || 'NORMAL', // ✅ Set priority
-        status: 'ASSIGNED', // ✅ Skip DRAFT, PENDING_APPROVAL, APPROVED
+        assignedToId: dto.assignedToId || null,
+        priority: dto.priority || 'NORMAL',
+        status: dto.assignedToId ? 'ASSIGNED' : 'UNASSIGNED',
       },
       include: {
         customer: true,

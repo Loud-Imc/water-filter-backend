@@ -21,6 +21,10 @@ import { SparePartGroupsModule } from './spare-part-groups/spare-part-groups.mod
 import { SparePartsModule } from './spare-parts/spare-parts.module';
 import { BOMTemplatesModule } from './bom-templates/bom-templates.module';
 import { AssembliesModule } from './assemblies/assemblies.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
+
+import { InvoicesModule } from './invoices/invoices.module';
+import { StockLedgerModule } from './stock-ledger/stock-ledger.module';
 
 @Module({
   imports: [
@@ -47,6 +51,9 @@ import { AssembliesModule } from './assemblies/assemblies.module';
     SparePartsModule,
     BOMTemplatesModule,
     AssembliesModule,
+    SuppliersModule,
+    InvoicesModule,
+    StockLedgerModule,
   ],
   controllers: [AppController],
   providers: [AppService],

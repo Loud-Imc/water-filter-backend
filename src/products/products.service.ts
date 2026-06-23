@@ -38,10 +38,22 @@ export class ProductsService {
       }
     }
 
+    // Validate supplier exists if provided
+    if (data.supplierId) {
+      const supplier = await this.prisma.supplier.findUnique({
+        where: { id: data.supplierId },
+      });
+
+      if (!supplier) {
+        throw new NotFoundException('Supplier not found');
+      }
+    }
+
     return this.prisma.product.create({
       data,
       include: {
         category: true, // ✅ NEW: Include category in response
+        supplier: true,
       },
     });
   }
@@ -54,6 +66,7 @@ export class ProductsService {
       orderBy: { name: 'asc' },
       include: {
         category: true, // ✅ NEW: Include category
+        supplier: true,
         _count: {
           select: {
             stockHistory: true,
@@ -68,6 +81,7 @@ export class ProductsService {
       where: { id },
       include: {
         category: true, // ✅ NEW: Include category
+        supplier: true,
         stockHistory: {
           orderBy: { createdAt: 'desc' },
           take: 10, // Last 10 stock changes
@@ -97,6 +111,7 @@ export class ProductsService {
       orderBy: { name: 'asc' },
       include: {
         category: true,
+        supplier: true,
       },
     });
   }
@@ -121,6 +136,17 @@ export class ProductsService {
       }
     }
 
+    // Validate supplier if being updated
+    if (data.supplierId) {
+      const supplier = await this.prisma.supplier.findUnique({
+        where: { id: data.supplierId },
+      });
+
+      if (!supplier) {
+        throw new NotFoundException('Supplier not found');
+      }
+    }
+
     if (data.hasWarranty === false) {
       // Clear warranty fields if warranty is disabled
       return this.prisma.product.update({
@@ -132,6 +158,7 @@ export class ProductsService {
         },
         include: {
           category: true, // ✅ NEW
+          supplier: true,
         },
       });
     }
@@ -141,6 +168,7 @@ export class ProductsService {
       data,
       include: {
         category: true, // ✅ NEW
+        supplier: true,
       },
     });
   }
@@ -310,6 +338,7 @@ export class ProductsService {
       },
       include: {
         category: true, // ✅ NEW
+        supplier: true,
       },
     });
   }

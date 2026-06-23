@@ -54,4 +54,23 @@ export class CreateProductDto {
   @IsOptional()
   @Min(1)
   warrantyYears?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  costPrice?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  reorderLevel?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  taxRate?: number;
+
+  @IsString()
+  @IsOptional()
+  supplierId?: string;
 }

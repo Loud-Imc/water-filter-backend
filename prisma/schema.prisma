@@ -23,6 +23,7 @@ enum RequestStatus {
   DRAFT
   PENDING_APPROVAL
   APPROVED
+  UNASSIGNED      // <-- New enum value for requests with no assigned technician
   ASSIGNED
   IN_PROGRESS
   RE_ASSIGNED     // <-- New enum value for reassigned after work complete
@@ -42,6 +43,27 @@ enum ServicePriority {
   MEDIUM
   NORMAL
   LOW
+}
+
+enum InvoiceType {
+  PURCHASE
+  SALES
+  SALES_RETURN
+  SUPPLIER_RETURN
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  CREDIT
 }
 
 // ============================================
@@ -115,6 +137,7 @@ model User {
   technicianStock        TechnicianStock[] 
   stockTransactions      TechnicianStockTransaction[]
   mergeRequestsRequested CustomerMergeRequest[]
+  invoicesCreated        Invoice[]                    @relation("InvoiceCreator")
 }
 
 model Customer {
@@ -143,6 +166,7 @@ model Customer {
   
   asSourceMergeRequests CustomerMergeRequest[] @relation("SourceCustomer")
   asTargetMergeRequests CustomerMergeRequest[] @relation("TargetCustomer")
+  invoices              Invoice[]
 
   @@index([regionId])
   @@index([primaryPhone])
@@ -212,6 +236,7 @@ model ServiceRequest {
   workLogs            WorkLog[]
   workMedia           WorkMedia[]
   approvalHistory     ApprovalHistory[]
+  invoices            Invoice[]
 
   @@index([installationId])
   @@index([categoryId])
@@ -338,6 +363,11 @@ model SparePart {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  costPrice    Float    @default(0)
+  reorderLevel Int      @default(10)
+  taxRate      Float    @default(18.0)
+  supplierId   String?
+
   group             SparePartGroup?         @relation(fields: [groupId], references: [id])
   stockHistory      SparePartStockHistory[]
   bomItems          BOMTemplateItem[]
@@ -345,6 +375,8 @@ model SparePart {
   usedInServices    ServiceUsedProduct[]
   technicianStock   TechnicianStock[] 
   stockTransactions TechnicianStockTransaction[]
+  supplier          Supplier?               @relation(fields: [supplierId], references: [id])
+  invoiceItems      InvoiceItem[]
 
   @@index([name])
   @@index([sku])
@@ -371,6 +403,11 @@ model Product {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  costPrice    Float    @default(0)
+  reorderLevel Int      @default(5)
+  taxRate      Float    @default(18.0)
+  supplierId   String?
+
   category        ProductCategory?      @relation(fields: [categoryId], references: [id])
   stockHistory    ProductStockHistory[]
   bomTemplate     BOMTemplate?
@@ -378,6 +415,8 @@ model Product {
   usedInServices  ServiceUsedProduct[]
   technicianStock TechnicianStock[] 
   stockTransactions TechnicianStockTransaction[]
+  supplier          Supplier?             @relation(fields: [supplierId], references: [id])
+  invoiceItems      InvoiceItem[]
 
   @@index([name])
   @@index([sku])
@@ -525,6 +564,12 @@ model ServiceUsedProduct {
   source       String   @default("technician") // Either "warehouse" or "technician"
   notes        String?
   
+  // External Product details
+  isExternal             Boolean @default(false)
+  externalName           String?
+  externalPrice          Float?
+  externalWarrantyMonths Int?
+  
   confirmedBy String
   confirmedAt DateTime @default(now())
 
@@ -597,6 +642,82 @@ model SystemSetting {
   updatedBy   String?
 
   @@index([key])
+}
+
+// ============================================
+// SUPPLIER / VENDOR
+// ============================================
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String
+  contactName String?
+  phone       String
+  email       String?
+  address     String?
+  gstin       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products    Product[]
+  spareParts  SparePart[]
+  invoices    Invoice[]
+}
+
+// ============================================
+// INVOICES
+// ============================================
+model Invoice {
+  id               String        @id @default(uuid())
+  invoiceNumber    String        @unique
+  type             InvoiceType
+  date             DateTime      @default(now())
+  
+  customerId       String?
+  supplierId       String?
+  serviceRequestId String?
+
+  subTotal         Float         @default(0)
+  discount         Float         @default(0)
+  taxAmount        Float         @default(0)
+  totalAmount      Float         @default(0)
+  amountPaid       Float         @default(0)
+
+  paymentStatus    PaymentStatus @default(UNPAID)
+  paymentMode      PaymentMode   @default(CASH)
+  notes            String?
+  createdById      String
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  customer         Customer?       @relation(fields: [customerId], references: [id])
+  supplier         Supplier?       @relation(fields: [supplierId], references: [id])
+  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+  createdBy        User            @relation("InvoiceCreator", fields: [createdById], references: [id])
+  items            InvoiceItem[]
+
+  @@index([customerId])
+  @@index([supplierId])
+  @@index([type])
+  @@index([date])
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  productId   String?
+  sparePartId String?
+  quantity    Int
+  unitPrice   Float
+  taxRate     Float    @default(18.0)
+  taxAmount   Float    @default(0)
+  totalPrice  Float
+
+  invoice     Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product     Product?   @relation(fields: [productId], references: [id])
+  sparePart   SparePart? @relation(fields: [sparePartId], references: [id])
+
+  @@index([invoiceId])
 }
 
 

@@ -42,8 +42,8 @@ export class CreateServiceRequestDto {
   priority?: ServicePriority;
 
   @IsString()
-  @IsNotEmpty()
-  assignedToId: string;
+  @IsOptional()
+  assignedToId?: string | null;
 
   @IsString()
   @IsOptional()
